@@ -12,7 +12,8 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   "https://pub-c51325b05b6848599be1cf2978bc4c0e.r2.dev/v6",
-  "https://pub-c51325b05b6848599be1cf2978bc4c0e.r2.dev"
+  "https://pub-c51325b05b6848599be1cf2978bc4c0e.r2.dev",
+  "https://0g-testfrontend.vercel.app"
 ];
 
 app.use(cors({
