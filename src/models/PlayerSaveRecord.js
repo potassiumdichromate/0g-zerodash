@@ -26,7 +26,7 @@ const ComputeValidationSchema = new mongoose.Schema({
 const PlayerSaveRecordSchema = new mongoose.Schema({
   walletAddress: { type: String, required: true, index: true },
 
-  rootHash:  { type: String, required: true, unique: true },
+  rootHash:  { type: String, required: true },
   txHash:    String,
   fileSize:  Number,
   checksum:  String,
