@@ -103,10 +103,14 @@ async function uploadBuffer(buffer) {
       const indexer = getIndexer();
       const signer  = getSigner();
 
-      const [txHash, uploadErr] = await indexer.upload(zgFile, ZG_RPC_URL, signer);
+      const [uploadResult, uploadErr] = await indexer.upload(zgFile, ZG_RPC_URL, signer);
       if (uploadErr) throw new Error(`Upload error: ${uploadErr}`);
 
-      return { rootHash, txHash, size: buffer.length, checksum };
+      // v1.2.9: upload returns [{txHash, rootHash, txSeq}, err] — not a bare string
+      const txHash     = uploadResult?.txHash     || String(uploadResult);
+      const finalRoot  = uploadResult?.rootHash   || rootHash;
+
+      return { rootHash: finalRoot, txHash, size: buffer.length, checksum };
     } catch (err) {
       rotateIndexer();
       throw err;
