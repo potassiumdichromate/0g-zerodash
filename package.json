@@ -1,0 +1,32 @@
+{
+  "name": "zerodash-0g-backend",
+  "version": "1.0.0",
+  "description": "ZeroDash game backend with 0G decentralized storage, DA, chain anchoring, and compute anti-cheat",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "deploy:anchor": "node scripts/deployAnchor.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "ethers-v6": "npm:ethers@^6.13.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.5.2",
+    "express-rate-limit": "^7.4.0",
+    "@0gfoundation/0g-storage-ts-sdk": "^0.3.0",
+    "@grpc/grpc-js": "^1.11.1",
+    "@grpc/proto-loader": "^0.7.13",
+    "@msgpack/msgpack": "^3.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
