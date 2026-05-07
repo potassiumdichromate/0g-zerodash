@@ -31,6 +31,6 @@
   "devDependencies": {
     "nodemon": "^3.1.4",
     "hardhat": "^2.22.0",
-    "@nomicfoundation/hardhat-ethers": "^3.0.6"
+    "@nomicfoundation/hardhat-ethers": "3.0.6"
   }
 }
