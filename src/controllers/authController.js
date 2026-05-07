@@ -54,10 +54,10 @@ exports.getNonce = async (req, res) => {
   // One nonce per wallet at a time — delete any existing before issuing a new one
   await AuthNonce.deleteMany({ wallet });
 
-  const nonce     = crypto.randomBytes(16).toString("hex");
-  const issuedAt  = new Date().toISOString();
-
-  await AuthNonce.create({ wallet, nonce });
+  const nonce    = crypto.randomBytes(16).toString("hex");
+  // Use createdAt from the saved doc so login can reconstruct the exact same message
+  const nonceDoc = await AuthNonce.create({ wallet, nonce });
+  const issuedAt = nonceDoc.createdAt.toISOString();
 
   const message = buildLoginMessage(wallet, nonce, issuedAt);
 

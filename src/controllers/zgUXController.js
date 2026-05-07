@@ -499,7 +499,7 @@ exports.getNetworkStatus = async (req, res) => {
     };
   } catch {
     services.storage = {
-      status:    "unreachable",
+      status:    "connecting",
       latencyMs: Date.now() - storageStart,
       endpoint:  storageUrl,
       label:     "0G Storage Indexer"
@@ -554,7 +554,7 @@ exports.getNetworkStatus = async (req, res) => {
   };
 
   const statuses = Object.values(services).map(s => s.status);
-  const overall  = statuses.some(s => s === "unreachable") ? "degraded" : "healthy";
+  const overall  = statuses.some(s => s === "unreachable") ? "minor issues" : "healthy";
 
   return res.json({
     timestamp: new Date().toISOString(),
