@@ -40,6 +40,9 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
+// Auth — nonce + signature login, issues JWT
+app.use("/auth", require("./routes/authRoutes"));
+
 // 0G UX endpoints — dashboard, activity, proof, badge, network, verified leaderboard
 app.use("/0g", require("./routes/zgUXRoutes"));
 

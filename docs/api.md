@@ -6,23 +6,149 @@ Base URL (local dev): `http://localhost:3001`
 
 ## Authentication
 
-Protected endpoints require a wallet identity. Send one of these:
+All protected endpoints require a wallet identity proved by a cryptographic signature. There are two supported flows.
 
-**Option A — Browser JWT** (what the game uses)
+---
+
+### Flow A — Signature auth (all new integrations)
+
+This is the correct flow. The client signs a server-issued nonce to prove they hold the private key for the wallet.
+
+**Step 1 — Request a nonce**
+
 ```
-POST body:
+GET /auth/nonce?wallet=0xabc...
+```
+
+Response:
+```json
 {
-  "jwt": "<signed JWT token>",
+  "wallet": "0xabc...",
+  "nonce": "a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6",
+  "issuedAt": "2024-12-01T14:21:58.000Z",
+  "message": "Sign in to ZeroDash\n\nWallet: 0xabc...\nNonce: a3f2b1...\nIssued At: 2024-12-01T14:21:58.000Z\n\nSigning this message grants access to ZeroDash only.\nIt will not trigger a blockchain transaction or cost gas fees.",
+  "expiresIn": 300
+}
+```
+
+**Step 2 — Sign the message**
+
+Sign the exact `message` string from the response using your wallet's private key. In ethers.js:
+
+```javascript
+const signer    = new ethers.Wallet(privateKey);
+const signature = await signer.signMessage(nonceResponse.message);
+```
+
+In React Native with WalletConnect or MetaMask Mobile, use `personal_sign` with the message as a UTF-8 hex string.
+
+**Step 3 — Exchange signature for JWT**
+
+```
+POST /auth/login
+Content-Type: application/json
+
+{
+  "wallet": "0xabc...",
+  "nonce": "a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6",
+  "signature": "0x..."
+}
+```
+
+Response:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "wallet": "0xabc...",
+  "expiresIn": 604800,
+  "tokenType": "Bearer"
+}
+```
+
+**Step 4 — Use the token**
+
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+```
+
+Tokens expire after 7 days. Nonces are single-use and expire after 5 minutes.
+
+---
+
+### Flow B — Browser JWT (existing game client)
+
+The game client sends its session JWT in the request body. This was the original auth path and continues to work unchanged.
+
+```json
+{
+  "jwt": "<signed JWT from game session>",
   "source": "browser"
 }
 ```
 
-**Option B — Bearer token** (for direct integrations / testing)
+---
+
+### What no longer works
+
 ```
-Authorization: Bearer 0x1234...abcd
+Authorization: Bearer 0x1234abcd
 ```
 
-The wallet address is extracted from the token server-side and set as `req.walletAddress`. Never send `X-Wallet-Address` as an identity header — it's ignored.
+Raw wallet addresses as Bearer tokens are rejected with HTTP 401. A wallet address proves nothing without a signature — anyone could claim any wallet. The response tells you exactly what to do instead:
+
+```json
+{
+  "error": "Raw wallet address is not a valid auth token.",
+  "step1": "GET /auth/nonce?wallet=<address>",
+  "step2": "Sign the returned message with your wallet",
+  "step3": "POST /auth/login  →  receive JWT",
+  "step4": "Authorization: Bearer <JWT>"
+}
+```
+
+---
+
+### Auth endpoints
+
+**GET /auth/nonce**
+
+Rate limit: 10/min
+
+```
+GET /auth/nonce?wallet=0xabc...
+```
+
+| param | required | description |
+|---|---|---|
+| `wallet` | yes | Ethereum address to authenticate |
+
+Returns the nonce and the exact message string to sign. Issuing a new nonce for a wallet invalidates any previous nonce for that wallet.
+
+---
+
+**POST /auth/login**
+
+Rate limit: 5/min
+
+```json
+{
+  "wallet": "0xabc...",
+  "nonce": "a3f2b1...",
+  "signature": "0x..."
+}
+```
+
+The server recovers the signing address using `ethers.verifyMessage(message, signature)`. If the recovered address matches `wallet`, a JWT is issued. The nonce is deleted immediately — it cannot be replayed.
+
+Error responses:
+
+```json
+{ "error": "Invalid or expired nonce.", "hint": "Request a fresh nonce via GET /auth/nonce?wallet=<address>" }
+{ "error": "Malformed signature" }
+{ "error": "Signature verification failed — signing address does not match wallet" }
+```
+
+---
 
 ---
 

@@ -20,6 +20,7 @@ const ZeroGStorage     = require("../services/ZeroGStorage");
 const ZeroGDA          = require("../services/ZeroGDA");
 const ZeroGChain       = require("../services/ZeroGChain");
 const ZeroGCompute     = require("../services/ZeroGCompute");
+const { withRetry }    = require("../utils/retry");
 
 const ZG_ENABLED = process.env.ZG_ENABLED !== "false";
 
@@ -27,26 +28,30 @@ const ZG_ENABLED = process.env.ZG_ENABLED !== "false";
 // Internal: runs AFTER the HTTP response has been sent
 // ─────────────────────────────────────────────────────────────────────────────
 async function runBackgroundPipeline(record, walletAddress, rootHash, saveInput) {
-  // Step 1 — Anchor root hash on-chain
+  // Step 1 — Anchor root hash on-chain (3 attempts: 5 s, 10 s, 20 s backoff)
   try {
-    const anchorTxHash = await ZeroGChain.anchorSaveHash(
-      walletAddress, rootHash, record.saveIndex
+    const anchorTxHash = await withRetry(
+      () => ZeroGChain.anchorSaveHash(walletAddress, rootHash, record.saveIndex),
+      { maxAttempts: 3, baseDelayMs: 5000, label: `anchor save ${record.saveIndex}` }
     );
     await PlayerSaveRecord.findByIdAndUpdate(record._id, { anchorTxHash });
     console.log(`[0G] Anchored save ${record.saveIndex} → ${anchorTxHash}`);
   } catch (err) {
-    console.error("[0G] Anchor failed:", err.message);
+    console.error("[0G] Anchor failed after retries:", err.message);
   }
 
-  // Step 2 — Publish commitment to 0G DA
+  // Step 2 — Publish commitment to 0G DA (DA client has its own 120 s internal timeout)
   try {
-    const proof = await ZeroGDA.publishCommitment({
-      walletAddress,
-      rootHash,
-      saveIndex:    record.saveIndex,
-      coinSnapshot: record.coinSnapshot,
-      timestamp:    Date.now()
-    });
+    const proof = await withRetry(
+      () => ZeroGDA.publishCommitment({
+        walletAddress,
+        rootHash,
+        saveIndex:    record.saveIndex,
+        coinSnapshot: record.coinSnapshot,
+        timestamp:    Date.now()
+      }),
+      { maxAttempts: 2, baseDelayMs: 10000, label: `DA publish save ${record.saveIndex}` }
+    );
 
     await PlayerSaveRecord.findByIdAndUpdate(record._id, {
       daStatus: "finalized",

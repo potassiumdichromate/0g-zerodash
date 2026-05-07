@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "deploy:anchor": "node scripts/deployAnchor.js"
+    "compile:contracts": "npx hardhat compile",
+    "deploy:anchor": "npx hardhat run scripts/deploy.js --network 0g-newton"
   },
   "dependencies": {
     "express": "^4.19.2",
@@ -27,6 +28,8 @@
     "@msgpack/msgpack": "^3.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "nodemon": "^3.1.4",
+    "hardhat": "^2.22.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.6"
   }
 }
