@@ -1,6 +1,6 @@
 # API Reference
 
-Base URL (local dev): `http://localhost:3001`
+Base URL: `https://zerog-zerodash.onrender.com`
 
 ---
 
