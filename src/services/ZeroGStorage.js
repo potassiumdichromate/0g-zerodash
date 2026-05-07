@@ -23,28 +23,56 @@ const { withRetry }           = require("../utils/retry");
 
 // 0G Mainnet
 const ZG_RPC_URL  = process.env.OG_MAINNET_RPC       || "https://evmrpc.0g.ai";
-const ZG_INDEXER  = process.env.ZG_INDEXER_RPC        || "https://indexer-storage-turbo.0g.ai";
 const ZG_CHAIN_ID = parseInt(process.env.OG_MAINNET_CHAIN_ID || "16661");
 
-let _indexer = null;
-let _signer  = null;
+// Ordered list of indexer endpoints — tried in sequence on failure
+const ZG_INDEXER_URLS = [
+  process.env.ZG_INDEXER_RPC,
+  "https://indexer-storage-turbo.0g.ai",
+  "https://indexer-storage-turbo-standard.0g.ai",
+  "https://storage-indexer-v2.0g.ai",
+].filter(Boolean);
+
+let _indexer     = null;
+let _indexerUrl  = null;
+let _signer      = null;
 
 function getSigner() {
+  const key = process.env.ZG_PRIVATE_KEY;
+  if (!key || key.startsWith("0xyour") || key === "your_private_key_here") {
+    throw new Error("ZG_PRIVATE_KEY is not configured. Set it in Render environment variables.");
+  }
   if (!_signer) {
     const provider = new ethers.JsonRpcProvider(ZG_RPC_URL, {
       chainId: ZG_CHAIN_ID,
       name:    "0g-mainnet"
     });
-    _signer = new ethers.Wallet(process.env.ZG_PRIVATE_KEY, provider);
+    _signer = new ethers.Wallet(key, provider);
   }
   return _signer;
 }
 
 function getIndexer() {
   if (!_indexer) {
-    _indexer = new Indexer(ZG_INDEXER);
+    const url = _indexerUrl || ZG_INDEXER_URLS[0];
+    _indexer    = new Indexer(url);
+    _indexerUrl = url;
+    console.log(`[0G] Using indexer: ${url}`);
   }
   return _indexer;
+}
+
+// Try next indexer URL in the list on repeated failure
+function rotateIndexer() {
+  const current = _indexerUrl || ZG_INDEXER_URLS[0];
+  const idx     = ZG_INDEXER_URLS.indexOf(current);
+  const next    = ZG_INDEXER_URLS[idx + 1];
+  if (next) {
+    console.warn(`[0G] Indexer ${current} failed — trying ${next}`);
+    _indexerUrl = next;
+  }
+  _indexer = null;
+  _signer  = null;
 }
 
 function tmpPath() {
@@ -80,8 +108,7 @@ async function uploadBuffer(buffer) {
 
       return { rootHash, txHash, size: buffer.length, checksum };
     } catch (err) {
-      _indexer = null; // force re-init on next attempt
-      _signer  = null;
+      rotateIndexer();
       throw err;
     } finally {
       if (zgFile) { try { await zgFile.close(); } catch {} }
@@ -103,7 +130,7 @@ async function downloadToBuffer(rootHash) {
       if (err) throw new Error(`Download error: ${err}`);
       return fs.readFileSync(tmp);
     } catch (err) {
-      _indexer = null;
+      rotateIndexer();
       throw err;
     } finally {
       try { fs.unlinkSync(tmp); } catch {}

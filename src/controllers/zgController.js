@@ -185,7 +185,7 @@ exports.saveBinary = async (req, res) => {
 
   } catch (err) {
     console.error("[0G] saveBinary error:", err);
-    return res.status(500).json({ error: "Failed to save binary data" });
+    return res.status(500).json({ error: "Failed to save binary data", detail: err.message });
   }
 };
 
