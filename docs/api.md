@@ -418,6 +418,469 @@ Lists all deployed contracts with addresses and chain info.
 
 ---
 
+---
+
+## UX / Display endpoints
+
+These endpoints are designed to be called directly from the game UI to surface 0G infrastructure status to players. Every response comes pre-formatted with labels, descriptions, explorer links, and display-ready data — no transformation needed on the client.
+
+All UX endpoints live under the `/0g` prefix.
+
+---
+
+### GET /0g/dashboard
+
+Returns everything you need for a player's personal 0G dashboard in a single call — summary stats, trust score, latest save pipeline, and a short activity feed.
+
+**Auth:** required
+**Rate limit:** 30 requests/minute
+
+**Request:**
+```
+GET /0g/dashboard
+Authorization: Bearer 0xabc...
+```
+
+**Response 200:**
+```json
+{
+  "wallet": "0xabc...",
+  "summary": {
+    "totalSaves": 14,
+    "finalizedSaves": 12,
+    "pendingSaves": 1,
+    "failedSaves": 1,
+    "anchoredSaves": 11,
+    "totalDataStored": "28.4 KB",
+    "totalDataStoredBytes": 29081
+  },
+  "trustScore": {
+    "score": 82,
+    "label": "PLATINUM",
+    "description": "Maximum trust. Saves are anchored, DA-finalized, and TEE-validated.",
+    "breakdown": {
+      "totalSaves": 14,
+      "finalizedSaves": 12,
+      "anchoredSaves": 11,
+      "computeValidated": 3,
+      "finalizedPercent": 85,
+      "anchoredPercent": 78
+    }
+  },
+  "latestSave": {
+    "saveIndex": 14,
+    "rootHash": "0x3f4a2b...",
+    "coinSnapshot": 1840,
+    "fileSize": "2.1 KB",
+    "checksum": "a3f2b1...",
+    "source": "game_save",
+    "createdAt": "2024-12-01T14:21:58.000Z",
+    "pipeline": {
+      "stored": {
+        "done": true,
+        "label": "Uploaded to 0G Storage",
+        "description": "Your save is stored on the 0G decentralized storage network.",
+        "rootHash": "0x3f4a2b...",
+        "txHash": "0x7e91cc...",
+        "fileSize": "2.1 KB",
+        "explorerUrl": "https://chainscan.0g.ai/tx/0x7e91cc..."
+      },
+      "anchored": {
+        "done": true,
+        "label": "Root hash anchored on-chain",
+        "description": "A permanent on-chain record links your wallet to this save.",
+        "txHash": "0x9d11...",
+        "block": 18204,
+        "explorerUrl": "https://chainscan.0g.ai/tx/0x9d11...",
+        "contractUrl": "https://chainscan.0g.ai/address/0x..."
+      },
+      "finalized": {
+        "done": true,
+        "label": "BLS-signed by 0G DA network",
+        "description": "A quorum of DA nodes signed off on this save's availability.",
+        "status": "finalized",
+        "batchId": "42",
+        "blobIndex": 3,
+        "batchHeaderHash": "0xf3...",
+        "referenceBlock": 18199,
+        "finalizedAt": "2024-12-01T14:22:03.000Z"
+      },
+      "validated": {
+        "done": true,
+        "label": "TEE anti-cheat verified",
+        "description": "A Trusted Execution Environment confirmed this save is legitimate.",
+        "status": "validated",
+        "verdict": "CLEAN",
+        "confidence": 0.97,
+        "teeVerified": true,
+        "flags": []
+      }
+    }
+  },
+  "recentActivity": [
+    {
+      "id": "14-da",
+      "type": "DA_FINALIZED",
+      "saveIndex": 14,
+      "timestamp": "2024-12-01T14:22:03.000Z",
+      "title": "Save #14 finalized by 0G DA",
+      "description": "BLS-signed finality proof generated. Batch #42, blob #3.",
+      "status": "success",
+      "data": { "batchId": "42", "blobIndex": 3, "batchHeaderHash": "0xf3..." },
+      "explorerUrl": null
+    }
+  ],
+  "contracts": {
+    "playerSaveAnchor": {
+      "address": "0x4f91ab...",
+      "explorerUrl": "https://chainscan.0g.ai/address/0x4f91ab..."
+    }
+  }
+}
+```
+
+The `pipeline` object inside `latestSave` is the main thing to render. Four stages in order: `stored → anchored → finalized → validated`. Each has `done: bool` so you can show checkmarks, spinners, or empty circles.
+
+---
+
+### GET /0g/activity
+
+Paginated timeline of all 0G events for the authenticated wallet. Each save generates multiple events (upload, anchor, DA finalization, compute verdict) that are flattened and sorted newest-first.
+
+**Auth:** required
+**Rate limit:** 30 requests/minute
+
+```
+GET /0g/activity?page=1&limit=20
+```
+
+**Response 200:**
+```json
+{
+  "wallet": "0xabc...",
+  "page": 1,
+  "totalPages": 3,
+  "totalEvents": 47,
+  "hasMore": true,
+  "events": [
+    {
+      "id": "14-da",
+      "type": "DA_FINALIZED",
+      "saveIndex": 14,
+      "timestamp": "2024-12-01T14:22:03.000Z",
+      "title": "Save #14 finalized by 0G DA",
+      "description": "BLS-signed finality proof generated. Batch #42, blob #3.",
+      "status": "success",
+      "data": { "batchId": "42", "blobIndex": 3 },
+      "explorerUrl": null
+    },
+    {
+      "id": "14-anchored",
+      "type": "SAVE_ANCHORED",
+      "saveIndex": 14,
+      "timestamp": "2024-12-01T14:22:01.000Z",
+      "title": "Save #14 anchored on-chain",
+      "description": "Root hash recorded permanently on the 0G EVM blockchain at block 18204.",
+      "status": "success",
+      "data": { "txHash": "0x9d11...", "block": 18204 },
+      "explorerUrl": "https://chainscan.0g.ai/tx/0x9d11..."
+    }
+  ]
+}
+```
+
+Event types and their `status` values:
+
+| type | status | when it fires |
+|---|---|---|
+| `SAVE_STORED` | success | rootHash exists (every save) |
+| `SAVE_ANCHORED` | success | anchorTxHash written by background pipeline |
+| `DA_FINALIZED` | success | daStatus becomes "finalized" |
+| `DA_FAILED` | error | DA timeout after 120s |
+| `COMPUTE_VALIDATED` | success | computeStatus becomes "validated" |
+| `COMPUTE_REJECTED` | warning | computeStatus becomes "rejected" |
+
+Events with `explorerUrl` can be linked directly — anchor events always have one, storage/DA/compute events may not.
+
+---
+
+### GET /0g/badge
+
+Returns the wallet's trust badge level and score, with a breakdown of how the score was computed and what's needed for the next level.
+
+**Auth:** required
+**Rate limit:** 30 requests/minute
+
+**Response 200:**
+```json
+{
+  "wallet": "0xabc...",
+  "badge": "GOLD",
+  "score": 74,
+  "description": "Strong verification coverage. Saves are anchored and DA-finalized.",
+  "breakdown": {
+    "totalSaves": 8,
+    "finalizedSaves": 7,
+    "anchoredSaves": 6,
+    "computeValidated": 0,
+    "finalizedPercent": 87,
+    "anchoredPercent": 75
+  },
+  "nextLevel": {
+    "label": "PLATINUM",
+    "hint": "Accumulate TEE-validated saves and reach 10+ total saves."
+  }
+}
+```
+
+Badge levels and score ranges:
+
+| Badge | Score | What it means |
+|---|---|---|
+| BRONZE | 1–30 | Saves uploading, anchoring/DA in progress |
+| SILVER | 31–55 | Most saves anchored and DA-pending |
+| GOLD | 56–80 | High DA finalization rate, strong anchoring |
+| PLATINUM | 81–100 | DA-finalized, anchored, and TEE-validated |
+
+Score breakdown:
+- 10 pts — has at least one save
+- Up to 40 pts — finalization rate (finalized ÷ total × 40)
+- Up to 25 pts — anchor rate (anchored ÷ total × 25)
+- 15 pts — has at least one TEE-validated save
+- 5–10 pts — volume (5+ saves = 5, 10+ saves = 10)
+
+---
+
+### GET /0g/network
+
+Live health check of all four 0G infrastructure services. Storage and chain are actively probed; DA and compute report config state.
+
+**Auth:** none
+**Rate limit:** 20 requests/minute
+
+**Response 200:**
+```json
+{
+  "timestamp": "2024-12-01T14:25:00.000Z",
+  "overall": "healthy",
+  "services": {
+    "storage": {
+      "status": "online",
+      "latencyMs": 142,
+      "endpoint": "https://indexer-storage-turbo.0g.ai",
+      "label": "0G Storage Indexer"
+    },
+    "chain": {
+      "status": "online",
+      "latencyMs": 89,
+      "blockNumber": 18204,
+      "chainId": 16600,
+      "endpoint": "https://evmrpc.0g.ai",
+      "explorerUrl": "https://chainscan.0g.ai",
+      "label": "0G Newton EVM"
+    },
+    "da": {
+      "status": "configured",
+      "endpoint": "disperser-testnet.0g.ai:51001",
+      "protocol": "gRPC",
+      "label": "0G DA Disperser"
+    },
+    "compute": {
+      "status": "configured",
+      "endpoint": "https://router-api.0g.ai",
+      "label": "0G Compute (TEE anti-cheat)",
+      "note": null
+    }
+  },
+  "contracts": {
+    "playerSaveAnchor": "0x4f91ab...",
+    "explorerUrl": "https://chainscan.0g.ai/address/0x4f91ab..."
+  }
+}
+```
+
+`overall` is `"healthy"` when all services report `"online"` or `"configured"`. It becomes `"degraded"` if the storage indexer or EVM RPC is unreachable.
+
+---
+
+### GET /0g/leaderboard/verified
+
+Top 100 wallets by coin snapshot, filtered by verification level. Includes a `verificationBadge` per entry so the frontend can show verification icons.
+
+**Auth:** none
+**Rate limit:** 30 requests/minute
+
+```
+GET /0g/leaderboard/verified?filter=finalized
+```
+
+The `filter` query param controls which saves are included:
+
+| filter | what qualifies |
+|---|---|
+| `finalized` (default) | `daStatus === "finalized"` |
+| `anchored` | has an `anchorTxHash` |
+| `validated` | `computeStatus === "validated"` |
+| `any` | any save with a rootHash |
+
+**Response 200:**
+```json
+{
+  "filter": "finalized",
+  "total": 67,
+  "leaderboard": [
+    {
+      "rank": 1,
+      "walletAddress": "0x3f4a2b8c1d...",
+      "displayName": "Warrior_3f4a2b",
+      "coinSnapshot": 18420,
+      "saveIndex": 14,
+      "verificationBadge": "FULLY_VERIFIED",
+      "daStatus": "finalized",
+      "computeStatus": "validated",
+      "anchorTxHash": "0x9d11...",
+      "anchorBlock": 18204,
+      "explorerUrl": "https://chainscan.0g.ai/tx/0x9d11..."
+    }
+  ]
+}
+```
+
+Verification badge values:
+
+| badge | meaning |
+|---|---|
+| `FULLY_VERIFIED` | DA finalized + compute validated |
+| `DA_VERIFIED` | DA finalized |
+| `ANCHORED` | has on-chain anchor tx |
+| `STORED` | uploaded to 0G Storage only |
+
+---
+
+### GET /0g/proof/:wallet/:saveIndex
+
+Shareable certificate for a specific save. Returns all cryptographic proof data — storage rootHash, on-chain anchor tx, DA commitment, and compute verdict — formatted for display.
+
+**Auth:** none (public, shareable URL)
+**Rate limit:** 20 requests/minute
+
+```
+GET /0g/proof/0xabc.../5
+```
+
+**Response 200:**
+```json
+{
+  "certificate": {
+    "wallet": "0xabc...",
+    "saveIndex": 5,
+    "rootHash": "0x3f4a2b...",
+    "issuedAt": "2024-12-01T14:21:58.000Z",
+    "verified": true,
+    "badge": "FULLY_VERIFIED"
+  },
+  "storage": {
+    "rootHash": "0x3f4a2b...",
+    "txHash": "0x7e91cc...",
+    "explorerUrl": "https://chainscan.0g.ai/tx/0x7e91cc...",
+    "fileSize": "2.1 KB",
+    "fileSizeBytes": 2150,
+    "checksum": "a3f2b1...",
+    "network": "0G Storage",
+    "indexerUrl": "https://indexer-storage-turbo.0g.ai"
+  },
+  "onChain": {
+    "contractAddress": "0x4f91ab...",
+    "contractUrl": "https://chainscan.0g.ai/address/0x4f91ab...",
+    "txHash": "0x9d11...",
+    "txUrl": "https://chainscan.0g.ai/tx/0x9d11...",
+    "block": 18204,
+    "chainId": 16600,
+    "network": "0G Newton Testnet"
+  },
+  "da": {
+    "status": "finalized",
+    "finalized": true,
+    "commitment": {
+      "batchId": "42",
+      "blobIndex": 3,
+      "batchHeaderHash": "0xf3...",
+      "referenceBlockNumber": 18199,
+      "finalizedAt": "2024-12-01T14:22:03.000Z"
+    },
+    "network": "0G DA Testnet",
+    "endpoint": "disperser-testnet.0g.ai:51001"
+  },
+  "compute": {
+    "status": "validated",
+    "verdict": "CLEAN",
+    "details": {
+      "valid": true,
+      "confidence": 0.97,
+      "flags": [],
+      "teeVerified": true,
+      "providerAddress": "0x...",
+      "validatedAt": "2024-12-01T14:22:05.000Z"
+    }
+  }
+}
+```
+
+`certificate.verified` is `true` when both `onChain` is non-null and `da.status === "finalized"`. This is the field to check for a "verified" badge UI.
+
+`onChain` will be `null` if the background pipeline hasn't anchored yet.
+
+---
+
+### GET /0g/explorer/:wallet
+
+Public 0G profile for any wallet — all saves with pipeline status, trust score, and on-chain anchor state. Useful for a player's public profile page.
+
+**Auth:** none
+**Rate limit:** 30 requests/minute
+
+```
+GET /0g/explorer/0xabc...
+```
+
+**Response 200:**
+```json
+{
+  "wallet": "0xabc...",
+  "displayName": "Warrior_abc123",
+  "trustBadge": "GOLD",
+  "trustScore": 74,
+  "totalSaves": 8,
+  "totalDataStored": "16.2 KB",
+  "onChainAnchor": {
+    "rootHash": "0x3f4a2b...",
+    "saveIndex": 8,
+    "timestamp": 1733060518,
+    "exists": true
+  },
+  "saves": [
+    {
+      "saveIndex": 8,
+      "rootHash": "0x3f4a2b...",
+      "coinSnapshot": 1840,
+      "fileSize": "2.1 KB",
+      "daStatus": "finalized",
+      "computeStatus": "skipped",
+      "badge": "DA_VERIFIED",
+      "anchorTxHash": "0x9d11...",
+      "explorerUrl": "https://chainscan.0g.ai/tx/0x9d11...",
+      "pipeline": { ... },
+      "createdAt": "2024-12-01T14:21:58.000Z"
+    }
+  ],
+  "contractUrl": "https://chainscan.0g.ai/address/0x4f91ab..."
+}
+```
+
+Returns the 20 most recent saves. Each save includes the full `pipeline` object (same shape as in `/0g/dashboard`) so you can render stage checkmarks inline.
+
+---
+
 ## Error reference
 
 | Code | Meaning |

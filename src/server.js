@@ -40,8 +40,10 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-// 0G routes are mounted FIRST so they take priority over legacy routes
-// when both share the /player prefix.
+// 0G UX endpoints — dashboard, activity, proof, badge, network, verified leaderboard
+app.use("/0g", require("./routes/zgUXRoutes"));
+
+// 0G save/load routes — mounted BEFORE legacy so they take priority on /player prefix
 app.use("/player", require("./routes/profileRoutes"));
 
 // Legacy player routes — unchanged, dual-write handled inside the controller
@@ -143,12 +145,21 @@ app.listen(PORT, () => {
   console.log(`   🧠 Compute:      ${process.env.ZG_COMPUTE_API_KEY  ? "✅ Set" : "⚠️  Skipped (ZG_COMPUTE_API_KEY not set)"}`);
   console.log(`   🚦 Enabled:      ${process.env.ZG_ENABLED !== "false" ? "✅ true" : "⚠️  false (dev mode)"}`);
   console.log("");
-  console.log("📡 0G Endpoints:");
+  console.log("📡 Save / Load:");
   console.log(`   POST   /player/save/binary`);
   console.log(`   GET    /player/load/binary`);
   console.log(`   GET    /player/save/metadata?wallet=0x...`);
   console.log(`   GET    /player/verify?wallet=0x...`);
   console.log(`   GET    /player/leaderboard/decentralized`);
+  console.log("");
+  console.log("🖥️  UX / Display:");
+  console.log(`   GET    /0g/dashboard              (auth)`);
+  console.log(`   GET    /0g/activity               (auth)`);
+  console.log(`   GET    /0g/badge                  (auth)`);
+  console.log(`   GET    /0g/network`);
+  console.log(`   GET    /0g/leaderboard/verified`);
+  console.log(`   GET    /0g/proof/:wallet/:saveIndex`);
+  console.log(`   GET    /0g/explorer/:wallet`);
   console.log("");
   console.log("✅ Server ready!");
   console.log("═══════════════════════════════════════════════════════");
