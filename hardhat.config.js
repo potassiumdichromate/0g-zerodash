@@ -10,6 +10,13 @@ module.exports = {
     }
   },
   networks: {
+    // Mainnet — deploy PlayerSaveAnchor here
+    "0g-mainnet": {
+      url:      process.env.OG_MAINNET_RPC || "https://evmrpc.0g.ai",
+      chainId:  16661,
+      accounts: process.env.ZG_PRIVATE_KEY ? [process.env.ZG_PRIVATE_KEY] : []
+    },
+    // Testnet — kept for local testing only; DA is testnet-only
     "0g-newton": {
       url:      process.env.ZG_RPC_URL || "https://evmrpc.0g.ai",
       chainId:  16600,

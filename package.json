@@ -11,7 +11,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "compile:contracts": "npx hardhat compile",
-    "deploy:anchor": "npx hardhat run scripts/deploy.js --network 0g-newton"
+    "deploy:anchor": "npx hardhat run scripts/deploy.js --network 0g-mainnet",
+    "deploy:anchor:testnet": "npx hardhat run scripts/deploy.js --network 0g-newton"
   },
   "dependencies": {
     "express": "^4.19.2",

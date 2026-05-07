@@ -6,12 +6,12 @@
  * automatically from source before deploying.
  *
  * Usage:
- *   npx hardhat run scripts/deploy.js --network 0g-newton
+ *   npx hardhat run scripts/deploy.js --network 0g-mainnet
  *
  * Prerequisites:
  *   - ZG_PRIVATE_KEY set in .env (this wallet becomes backendOperator)
- *   - ZG_RPC_URL set in .env (defaults to https://evmrpc.0g.ai)
- *   - Wallet funded with A0GI testnet tokens (https://faucet.0g.ai)
+ *   - OG_MAINNET_RPC set in .env (defaults to https://evmrpc.0g.ai)
+ *   - Wallet funded with A0GI on 0G Mainnet (chainId 16661)
  *
  * After deploy:
  *   Copy the printed address into .env as ZG_ANCHOR_CONTRACT_ADDRESS
@@ -34,8 +34,8 @@ async function main() {
 
   if (balance === 0n) {
     throw new Error(
-      `Deployer wallet ${deployer.address} has no balance.\n` +
-      "Get testnet tokens at: https://faucet.0g.ai"
+      `Deployer wallet ${deployer.address} has no balance on 0G Mainnet.\n` +
+      "Fund this wallet with A0GI on chainId 16661 before deploying."
     );
   }
 

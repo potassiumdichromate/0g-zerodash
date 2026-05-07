@@ -18,9 +18,10 @@ const fs     = require("fs");
 const crypto = require("crypto");
 const { withRetry } = require("../utils/retry");
 
-const ZG_RPC_URL  = process.env.ZG_RPC_URL    || "https://evmrpc.0g.ai";
-const ZG_INDEXER  = process.env.ZG_INDEXER_RPC || "https://indexer-storage-turbo.0g.ai";
-const ZG_CHAIN_ID = parseInt(process.env.ZG_CHAIN_ID || "16600");
+// Storage runs on 0G Mainnet (chainId 16661)
+const ZG_RPC_URL  = process.env.OG_MAINNET_RPC      || "https://evmrpc.0g.ai";
+const ZG_INDEXER  = process.env.ZG_INDEXER_RPC       || "https://indexer-storage-turbo-v2.0g.ai";
+const ZG_CHAIN_ID = parseInt(process.env.OG_MAINNET_CHAIN_ID || "16661");
 
 let _indexer = null;
 
@@ -30,7 +31,7 @@ async function buildIndexer() {
 
   const provider = new ethers.JsonRpcProvider(ZG_RPC_URL, {
     chainId: ZG_CHAIN_ID,
-    name:    "0g-newton"
+    name:    "0g-mainnet"
   });
   const signer = new ethers.Wallet(process.env.ZG_PRIVATE_KEY, provider);
 

@@ -2,14 +2,15 @@
  * ZeroGChain — anchor rootHash on 0G EVM chain via PlayerSaveAnchor contract.
  *
  * Uses ethers-v6 alias (never ethers v5).
- * Chain: 0G EVM chainId 16600.
- * Config: ZG_RPC_URL, ZG_CHAIN_ID, ZG_ANCHOR_CONTRACT_ADDRESS, ZG_PRIVATE_KEY.
+ * Chain: 0G Mainnet chainId 16661.
+ * Config: OG_MAINNET_RPC, OG_MAINNET_CHAIN_ID, ZG_ANCHOR_CONTRACT_ADDRESS, ZG_PRIVATE_KEY.
  */
 
 const { ethers } = require("ethers-v6");
 
-const ZG_RPC_URL    = process.env.ZG_RPC_URL  || "https://evmrpc.0g.ai";
-const ZG_CHAIN_ID   = parseInt(process.env.ZG_CHAIN_ID || "16600");
+// Anchor contract lives on 0G Mainnet (chainId 16661)
+const ZG_RPC_URL  = process.env.OG_MAINNET_RPC      || "https://evmrpc.0g.ai";
+const ZG_CHAIN_ID = parseInt(process.env.OG_MAINNET_CHAIN_ID || "16661");
 
 const ANCHOR_ABI = [
   "function anchorSave(address wallet, string rootHash, uint64 saveIndex) external",
@@ -25,7 +26,7 @@ function getProvider() {
   if (!_provider) {
     _provider = new ethers.JsonRpcProvider(ZG_RPC_URL, {
       chainId: ZG_CHAIN_ID,
-      name: "0g-newton"
+      name: "0g-mainnet"
     });
   }
   return _provider;

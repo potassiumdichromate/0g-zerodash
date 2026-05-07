@@ -66,9 +66,9 @@ app.get("/blockchain-info", (_, res) => {
       leaderboard: { ready: leaderboardService.isReady(), contractInfo: leaderboardService.getContractInfo() }
     },
     network: {
-      name:    "0G Newton Testnet",
-      chainId: parseInt(process.env.ZG_CHAIN_ID || "16600"),
-      rpcUrl:  process.env.ZG_RPC_URL || "https://evmrpc.0g.ai",
+      name:    "0G Mainnet",
+      chainId: parseInt(process.env.OG_MAINNET_CHAIN_ID || "16661"),
+      rpcUrl:  process.env.OG_MAINNET_RPC || "https://evmrpc.0g.ai",
       explorer: "https://chainscan.0g.ai"
     }
   });
@@ -107,8 +107,8 @@ app.get("/stats", async (_, res) => {
 
 app.get("/contracts", (_, res) => {
   res.json({
-    network: "0G Newton Testnet",
-    chainId: 16600,
+    network: "0G Mainnet",
+    chainId: 16661,
     explorer: "https://chainscan.0g.ai",
     contracts: {
       sessionTracker: {
@@ -121,7 +121,7 @@ app.get("/contracts", (_, res) => {
       },
       playerSaveAnchor: {
         address: process.env.ZG_ANCHOR_CONTRACT_ADDRESS,
-        purpose: "Anchors player save root hashes (0G EVM chainId 16600)"
+        purpose: "Anchors player save root hashes (0G Mainnet chainId 16661)"
       }
     }
   });
@@ -139,13 +139,13 @@ app.listen(PORT, () => {
   console.log(`🌐 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log("");
   console.log("🔗 0G Infrastructure:");
-  console.log(`   ⛓️  RPC URL:      ${process.env.ZG_RPC_URL          || "❌ ZG_RPC_URL not set"}`);
-  console.log(`   🔢 Chain ID:     ${process.env.ZG_CHAIN_ID         || "❌ ZG_CHAIN_ID not set"}`);
-  console.log(`   📦 Storage:      ${process.env.ZG_INDEXER_RPC      || "❌ ZG_INDEXER_RPC not set"}`);
-  console.log(`   📡 DA Disperser: ${process.env.ZG_DA_DISPERSER     || "❌ ZG_DA_DISPERSER not set"}`);
+  console.log(`   ⛓️  Mainnet RPC:  ${process.env.OG_MAINNET_RPC         || "https://evmrpc.0g.ai (default)"}`);
+  console.log(`   🔢 Chain ID:     ${process.env.OG_MAINNET_CHAIN_ID    || "16661 (mainnet)"}`);
+  console.log(`   📦 Storage:      ${process.env.ZG_INDEXER_RPC         || "❌ ZG_INDEXER_RPC not set"}`);
+  console.log(`   📡 DA Disperser: ${process.env.ZG_DA_DISPERSER        || "❌ ZG_DA_DISPERSER not set"} (testnet)`);
   console.log(`   📜 Anchor:       ${process.env.ZG_ANCHOR_CONTRACT_ADDRESS || "❌ ZG_ANCHOR_CONTRACT_ADDRESS not set"}`);
   console.log(`   🔑 Operator Key: ${process.env.ZG_PRIVATE_KEY ? "✅ Set" : "❌ ZG_PRIVATE_KEY not set"}`);
-  console.log(`   🧠 Compute:      ${process.env.ZG_COMPUTE_API_KEY  ? "✅ Set" : "⚠️  Skipped (ZG_COMPUTE_API_KEY not set)"}`);
+  console.log(`   🧠 Compute:      ${process.env.ZG_COMPUTE_API_KEY     ? "✅ Set" : "⚠️  Skipped (ZG_COMPUTE_API_KEY not set)"}`);
   console.log(`   🚦 Enabled:      ${process.env.ZG_ENABLED !== "false" ? "✅ true" : "⚠️  false (dev mode)"}`);
   console.log("");
   console.log("📡 Save / Load:");
