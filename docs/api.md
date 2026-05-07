@@ -800,10 +800,10 @@ Live health check of all four 0G infrastructure services. Storage and chain are 
       "status": "online",
       "latencyMs": 89,
       "blockNumber": 18204,
-      "chainId": 16600,
+      "chainId": 16661,
       "endpoint": "https://evmrpc.0g.ai",
       "explorerUrl": "https://chainscan.0g.ai",
-      "label": "0G Newton EVM"
+      "label": "0G Mainnet EVM"
     },
     "da": {
       "status": "configured",
@@ -921,8 +921,8 @@ GET /0g/proof/0xabc.../5
     "txHash": "0x9d11...",
     "txUrl": "https://chainscan.0g.ai/tx/0x9d11...",
     "block": 18204,
-    "chainId": 16600,
-    "network": "0G Newton Testnet"
+    "chainId": 16661,
+    "network": "0G Mainnet"
   },
   "da": {
     "status": "finalized",

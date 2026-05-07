@@ -1,54 +1,48 @@
 /**
  * ZeroGStorage — upload/download binary player saves to 0G Storage.
  *
- * Uses dynamic import() because @0gfoundation/0g-storage-ts-sdk is ESM-only.
- * Uploads write to a tmp file first, then ZgFile.fromFilePath() + indexer.upload().
- * Downloads use withProof: true for Merkle verification.
- * Signing uses the ethers-v6 alias.
+ * SDK v1.2.9 has a proper CommonJS build so require() works directly.
  *
- * Resilience design:
- *   - _indexer singleton is reset to null on any error so the next call re-initialises.
- *   - uploadBuffer and downloadToBuffer both retry up to 3 times with exponential backoff.
- *   - Tmp files are always cleaned up in a finally block.
+ * v1.2.9 API differences from earlier versions:
+ *   - new Indexer(indRpc)           — signer NOT in constructor
+ *   - indexer.upload(file, evmRpc, signer)  — signer passed per-call
+ *   - indexer.download(rootHash, path, withProof) — returns err directly
+ *   - file.close() must be called after merkleTree() / upload()
+ *
+ * Runs on 0G Mainnet (chainId 16661).
+ * Resilience: singleton Indexer reset on error, retry with exponential backoff.
  */
 
 const os     = require("os");
 const path   = require("path");
 const fs     = require("fs");
 const crypto = require("crypto");
-const { withRetry } = require("../utils/retry");
+const { ethers }              = require("ethers-v6");
+const { Indexer, ZgFile }     = require("@0gfoundation/0g-storage-ts-sdk");
+const { withRetry }           = require("../utils/retry");
 
-// Storage runs on 0G Mainnet (chainId 16661)
-const ZG_RPC_URL  = process.env.OG_MAINNET_RPC      || "https://evmrpc.0g.ai";
-const ZG_INDEXER  = process.env.ZG_INDEXER_RPC       || "https://indexer-storage-turbo-v2.0g.ai";
+// 0G Mainnet
+const ZG_RPC_URL  = process.env.OG_MAINNET_RPC       || "https://evmrpc.0g.ai";
+const ZG_INDEXER  = process.env.ZG_INDEXER_RPC        || "https://indexer-storage-turbo.0g.ai";
 const ZG_CHAIN_ID = parseInt(process.env.OG_MAINNET_CHAIN_ID || "16661");
 
 let _indexer = null;
+let _signer  = null;
 
-async function buildIndexer() {
-  const { ethers } = await import("ethers-v6");
-  const sdk = await import("@0gfoundation/0g-storage-ts-sdk");
-
-  const provider = new ethers.JsonRpcProvider(ZG_RPC_URL, {
-    chainId: ZG_CHAIN_ID,
-    name:    "0g-mainnet"
-  });
-  const signer = new ethers.Wallet(process.env.ZG_PRIVATE_KEY, provider);
-
-  if (typeof sdk.getIndexer === "function") {
-    return sdk.getIndexer(ZG_INDEXER, signer);
+function getSigner() {
+  if (!_signer) {
+    const provider = new ethers.JsonRpcProvider(ZG_RPC_URL, {
+      chainId: ZG_CHAIN_ID,
+      name:    "0g-mainnet"
+    });
+    _signer = new ethers.Wallet(process.env.ZG_PRIVATE_KEY, provider);
   }
-  return new sdk.Indexer(ZG_INDEXER, signer);
+  return _signer;
 }
 
-/**
- * Returns the cached indexer, creating it on first call.
- * On error, the caller resets _indexer to null so the next
- * invocation starts fresh rather than returning a broken instance.
- */
-async function getIndexer() {
+function getIndexer() {
   if (!_indexer) {
-    _indexer = await buildIndexer();
+    _indexer = new Indexer(ZG_INDEXER);
   }
   return _indexer;
 }
@@ -63,33 +57,34 @@ function tmpPath() {
 /**
  * Upload a buffer to 0G Storage.
  * Returns { rootHash, txHash, size, checksum }.
- * Retries up to 3 times; resets the indexer singleton on failure
- * so the next retry re-establishes the connection.
  */
 async function uploadBuffer(buffer) {
   return withRetry(async () => {
     const tmp = tmpPath();
+    let zgFile = null;
     try {
       fs.writeFileSync(tmp, buffer);
 
-      const sdk     = await import("@0gfoundation/0g-storage-ts-sdk");
-      const indexer = await getIndexer();
-
-      const file = await sdk.ZgFile.fromFilePath(tmp);
-      const [tree, treeErr] = await file.merkleTree();
+      zgFile = await ZgFile.fromFilePath(tmp);
+      const [tree, treeErr] = await zgFile.merkleTree();
       if (treeErr) throw new Error(`Merkle tree error: ${treeErr}`);
 
       const rootHash = tree.rootHash();
       const checksum = crypto.createHash("sha256").update(buffer).digest("hex");
 
-      const [txHash, uploadErr] = await indexer.upload(file);
+      const indexer = getIndexer();
+      const signer  = getSigner();
+
+      const [txHash, uploadErr] = await indexer.upload(zgFile, ZG_RPC_URL, signer);
       if (uploadErr) throw new Error(`Upload error: ${uploadErr}`);
 
       return { rootHash, txHash, size: buffer.length, checksum };
     } catch (err) {
       _indexer = null; // force re-init on next attempt
+      _signer  = null;
       throw err;
     } finally {
+      if (zgFile) { try { await zgFile.close(); } catch {} }
       try { fs.unlinkSync(tmp); } catch {}
     }
   }, { maxAttempts: 3, baseDelayMs: 4000, label: "ZeroGStorage.upload" });
@@ -97,20 +92,18 @@ async function uploadBuffer(buffer) {
 
 /**
  * Download a file from 0G Storage by rootHash.
- * withProof: true — nodes return a Merkle inclusion proof so we can
- * verify the file content matches the rootHash before trusting it.
- * Retries up to 3 times; resets the indexer singleton on failure.
+ * withProof: true verifies Merkle inclusion during download.
  */
 async function downloadToBuffer(rootHash) {
   return withRetry(async () => {
     const tmp = tmpPath();
     try {
-      const indexer = await getIndexer();
-      const [, dlErr] = await indexer.download(rootHash, tmp, true);
-      if (dlErr) throw new Error(`Download error: ${dlErr}`);
+      const indexer = getIndexer();
+      const err = await indexer.download(rootHash, tmp, true);
+      if (err) throw new Error(`Download error: ${err}`);
       return fs.readFileSync(tmp);
     } catch (err) {
-      _indexer = null; // force re-init on next attempt
+      _indexer = null;
       throw err;
     } finally {
       try { fs.unlinkSync(tmp); } catch {}

@@ -12,11 +12,11 @@ The short version: every player save gets uploaded to 0G's decentralized storage
 
 This backend talks to two separate 0G networks and it's important not to confuse them.
 
-**0G Mainnet (chainId 16661)** — this is where the existing session and leaderboard contracts live. These were deployed before this backend was written and haven't changed. The `sessionService` and `leaderboardService` in `src/blockchain/` connect here using the `PRIVATE_KEY` / `OG_MAINNET_RPC` env vars.
+**0G Mainnet (chainId 16661)** — this is where everything lives: the `PlayerSaveAnchor` contract, 0G Storage uploads, the session contract, and the leaderboard contract. All services in `src/services/` and `src/blockchain/` target this chain. The env vars are `OG_MAINNET_RPC` and `OG_MAINNET_CHAIN_ID`.
 
-**0G Newton Testnet (chainId 16600)** — this is where the new `PlayerSaveAnchor` contract lives, and where 0G Storage transactions are submitted. Everything in `src/services/` uses `ZG_PRIVATE_KEY` / `ZG_RPC_URL` and targets this chain.
+**0G DA Testnet** — the one exception. 0G Data Availability is only available on testnet at the moment. The gRPC disperser (`disperser-testnet.0g.ai:51001`) is testnet-only. Everything else is mainnet.
 
-Same RPC URL (`https://evmrpc.0g.ai`) can serve both, but the chain IDs are different and the signing wallets are kept separate intentionally.
+Same RPC URL (`https://evmrpc.0g.ai`) serves the mainnet, and DA runs separately over gRPC on its own testnet endpoint.
 
 ---
 
@@ -30,19 +30,19 @@ There are four distinct 0G components in play. Here's what each one does and why
 
 When a player hits `POST /player/save/binary`, the raw binary save file gets uploaded here. The upload returns a `rootHash` — this is the content-addressed identifier for the file, derived from the Merkle tree of its chunks. That root hash is the single identifier that threads through everything else in the pipeline.
 
-The SDK (`@0gfoundation/0g-storage-ts-sdk`) is ESM-only, which is why `ZeroGStorage.js` uses dynamic `import()` instead of `require()`. The flow is:
+The SDK (`@0gfoundation/0g-storage-ts-sdk` v1.2.9) ships a CommonJS build, so `ZeroGStorage.js` uses `require()` directly — no dynamic `import()` needed. The flow is:
 
 ```
 Buffer → write to /tmp → ZgFile.fromFilePath() → merkleTree() → rootHash
                                                                ↓
-                                                         indexer.upload()
+                                              indexer.upload(file, evmRpc, signer)
                                                                ↓
-                                                            txHash
+                                                    txHash  +  file.close()
 ```
 
-Downloads use `withProof: true`, which means the storage nodes return a Merkle inclusion proof alongside the file data. This lets you verify the file content matches the root hash before trusting it.
+Key API details in v1.2.9: `new Indexer(indRpc)` takes only the indexer URL — the signer is passed per-call to `upload()`. `file.close()` must be called after use. Downloads use `indexer.download(rootHash, path, true)` where the third argument is the `withProof` boolean — the storage nodes return a Merkle inclusion proof to verify the content matches the root hash.
 
-One thing to know: the indexer is a singleton (`_indexer = null` at module scope). First call initializes it with the signer; subsequent calls reuse the connection. If you're running into authentication errors after a server restart, it's because the indexer needs re-initialization — just restart the process.
+The Indexer is a singleton (`_indexer = null` at module scope). It is reset to `null` on any error so the next call re-initialises from scratch rather than reusing a broken connection. The signer singleton (`_signer`) is reset alongside it.
 
 ### 2. 0G DA (Data Availability)
 
@@ -72,7 +72,7 @@ Status codes from the disperser:
 
 ### 3. 0G EVM Chain (PlayerSaveAnchor)
 
-Once we have a rootHash from Storage, we anchor it on-chain by calling `anchorSave(wallet, rootHash, saveIndex)` on the `PlayerSaveAnchor` contract. This creates a permanent, immutable record on the 0G EVM that says "wallet X had save Y with this content at this block."
+Once we have a rootHash from Storage, we anchor it on-chain by calling `anchorSave(wallet, rootHash, saveIndex)` on the `PlayerSaveAnchor` contract deployed on 0G Mainnet (chainId 16661). This creates a permanent, immutable record that says "wallet X had save Y with this content at this block."
 
 The contract is designed around two security requirements:
 
@@ -191,7 +191,7 @@ Every protected endpoint sets `req.walletAddress` from the JWT middleware before
 
 **Browser JWT** — sent as `{ jwt: "...", source: "browser" }` in the request body. Verified with `BROWSER_JWT_SECRET`. The wallet is extracted from `payload.walletAddress`, `payload.address`, `payload.wallet`, or `payload.sub` — whichever is present.
 
-**Bearer token** — sent as `Authorization: Bearer <walletAddress>`. Used for direct integrations and testing.
+**Bearer token** — sent as `Authorization: Bearer <JWT>`. The JWT is obtained from `POST /auth/login` after signing a server-issued nonce. Raw wallet addresses as Bearer tokens are rejected with 401.
 
 The `X-Wallet-Address` header is never used for identity. It exists only as an informational response header sent back to the client.
 
@@ -206,3 +206,13 @@ ZG_ENABLED=false
 Set this and the entire 0G pipeline becomes a no-op. Storage uploads return stub values, background pipelines skip, downloads return a placeholder buffer. The legacy MongoDB + blockchain (chainId 16661) paths still function normally. This is the right setting for local development when you don't want to spend testnet gas or wait for DA finality on every save.
 
 When `ZG_ENABLED=true` but `ZG_COMPUTE_API_KEY` is not set, the storage + DA + anchor pipeline still runs. Compute just skips (`computeStatus: "skipped"`) and logs a note. Compute is the one optional layer — everything else is required for a fully verified save.
+
+## Network summary
+
+| Layer | Network | Chain ID | Key env var |
+|---|---|---|---|
+| Storage | 0G Mainnet | 16661 | `OG_MAINNET_RPC`, `ZG_INDEXER_RPC` |
+| Chain (Anchor) | 0G Mainnet | 16661 | `OG_MAINNET_RPC`, `ZG_ANCHOR_CONTRACT_ADDRESS` |
+| DA | 0G Testnet | — | `ZG_DA_DISPERSER` (testnet-only, stays testnet) |
+| Compute | 0G Mainnet API | — | `ZG_COMPUTE_API_KEY` |
+| Sessions/Leaderboard | 0G Mainnet | 16661 | `OG_MAINNET_RPC`, `PRIVATE_KEY` |

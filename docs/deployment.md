@@ -3,14 +3,21 @@
 ## Before you start
 
 You need:
-- Node.js 18 or later (the `@0gfoundation/0g-storage-ts-sdk` uses ESM dynamic imports that require it)
+- Node.js 18 or later
 - MongoDB — local or Atlas, doesn't matter
-- A funded wallet on 0G Newton Testnet (chainId 16600) for the `ZG_PRIVATE_KEY`
-- A funded wallet on 0G Mainnet (chainId 16661) for the `PRIVATE_KEY` (only needed for session/leaderboard contracts, which are already deployed)
+- A funded wallet on **0G Mainnet (chainId 16661)** for `ZG_PRIVATE_KEY` — this wallet signs storage uploads and calls `anchorSave` on the contract
+- A funded wallet on **0G Mainnet (chainId 16661)** for `PRIVATE_KEY` — this wallet signs session and leaderboard contract calls (can be the same wallet)
 
-If you're just running locally and don't want to touch any 0G infrastructure, set `ZG_ENABLED=false` in your `.env` and skip the contract deploy entirely. The server will run fine — 0G operations will be stubbed.
+If you're just running locally and don't want to touch any 0G infrastructure, set `ZG_ENABLED=false` in your `.env`. The server will run fine — all 0G operations will be no-ops.
 
-Get testnet tokens: https://faucet.0g.ai
+**Network overview:**
+
+| Layer | Network | Chain ID |
+|---|---|---|
+| Storage, Chain (Anchor), Compute | 0G Mainnet | 16661 |
+| DA (disperser) | 0G Testnet | — (gRPC, no chain ID) |
+
+DA is the only thing that stays on testnet — 0G DA mainnet is not available yet.
 
 ---
 
@@ -18,108 +25,102 @@ Get testnet tokens: https://faucet.0g.ai
 
 ```bash
 cd zerodash-0g-backend
-npm install
+npm install --legacy-peer-deps
 ```
 
-The `ethers-v6` entry in `package.json` is an npm alias: `"ethers-v6": "npm:ethers@^6.13.0"`. This installs ethers v6 under the name `ethers-v6` so the 0G services can explicitly require it without ambiguity. You'll see it under `node_modules/ethers-v6`.
+The `--legacy-peer-deps` flag is needed because `@0gfoundation/0g-storage-ts-sdk@1.2.9` pins `ethers@6.13.1` exactly. The flag tells npm to accept the pinned version without erroring.
+
+The `ethers-v6` entry in `package.json` is an npm alias: `"ethers-v6": "npm:ethers@6.13.1"`. This installs ethers under the name `ethers-v6` so the 0G services can explicitly require it. You'll see it under `node_modules/ethers-v6`.
 
 ---
 
 ## Environment setup
 
-Copy the example file and fill it in:
-
 ```bash
 cp .env.example .env
 ```
 
-Here's what each variable does:
+Open `.env` and fill in every value. Here's what each variable does:
 
 ```
 PORT=3001
 NODE_ENV=development
 MONGO_URI=mongodb://localhost:27017/zerodash-0g
 ```
-Standard stuff. Use a different DB name than your existing backend so they don't share collections.
+Standard. Use a different DB name than your existing backend.
 
 ```
 BROWSER_JWT_SECRET=...
 ```
-Must match whatever the game client uses to sign its JWTs. If you're running both backends side-by-side, they share this secret.
+Must match whatever the game client uses to sign its JWTs. Generate a strong secret:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
 ```
-ZG_RPC_URL=https://evmrpc.0g.ai
-ZG_CHAIN_ID=16600
+OG_MAINNET_RPC=https://evmrpc.0g.ai
+OG_MAINNET_CHAIN_ID=16661
 ```
-Newton testnet. Don't change these unless 0G spins up a different testnet endpoint.
+0G Mainnet RPC. Used by Storage, Chain anchoring, and the session/leaderboard contracts.
 
 ```
 ZG_INDEXER_RPC=https://indexer-storage-turbo.0g.ai
 ```
-The 0G Storage indexer. This is what the storage SDK connects to when uploading/downloading files.
+The 0G Storage indexer on mainnet. This is what the storage SDK connects to when uploading and downloading files.
 
 ```
 ZG_DA_DISPERSER=disperser-testnet.0g.ai:51001
 ```
-gRPC endpoint for the DA disperser. Port 51001, plaintext (no TLS on testnet).
+gRPC endpoint for the DA disperser. This is testnet — DA is not on mainnet yet. Port 51001, plaintext (no TLS).
 
 ```
 ZG_PRIVATE_KEY=0x...
 ```
-The backend operator wallet. This wallet signs storage uploads and calls `anchorSave` on the contract. It's also the address set as `backendOperator` in the contract at deploy time — that relationship is permanent.
+The backend operator wallet on 0G Mainnet. This wallet signs storage uploads (`indexer.upload`) and sends `anchorSave` transactions. It is also set as `backendOperator` in the contract at deploy time — that relationship is permanent and immutable.
 
 ```
 ZG_ANCHOR_CONTRACT_ADDRESS=0x...
 ```
-Set this after running the deploy script. See the contract deployment section below.
+Set this after running the deploy script. See contract deployment below.
 
 ```
 ZG_COMPUTE_API_KEY=
 ```
-Optional. If blank, the compute anti-cheat layer is skipped entirely. Get a key from https://dashboard.0g.ai — you'll need to fund a compute account.
+Optional. Get a key from https://pc.0g.ai. If blank, the compute anti-cheat layer is skipped entirely. The model used is `deepseek/deepseek-chat-v3-0324` with `verify_tee: true`.
 
 ```
 ZG_ENABLED=true
 ```
-The master switch. `false` disables all 0G operations without breaking anything else.
+Master switch. `false` disables all 0G operations without breaking anything else.
 
 ```
-OG_MAINNET_RPC=https://evmrpc.0g.ai
 PRIVATE_KEY=0x...
 SESSION_CONTRACT_ADDRESS=0x9D8090A0D65370A9c653f71e605718F397D1B69C
 LEADERBOARD_CONTRACT_ADDRESS=0x...
 ```
-These are for the existing session and leaderboard contracts on chainId 16661. The session contract address is already in the code as a default fallback, but set it explicitly in `.env` to be safe.
+For the existing session and leaderboard contracts on 0G Mainnet (chainId 16661). The session contract address is already in the code as a default fallback.
 
 ---
 
 ## Deploying the PlayerSaveAnchor contract
 
-This only needs to happen once per environment (dev/staging/prod). Hardhat compiles the contract from source automatically — no Remix, no copy-pasting bytecode.
+This only needs to happen once per environment. Hardhat compiles the contract from source automatically — no Remix, no copy-pasting bytecode.
 
-**Step 1 — Install dev dependencies**
-
-Hardhat is listed under `devDependencies`. If you skipped dev deps during install:
-
-```bash
-npm install
-```
-
-**Step 2 — Compile (optional sanity check)**
+**Step 1 — Compile (optional sanity check)**
 
 ```bash
 npm run compile:contracts
 ```
 
-This runs `npx hardhat compile` which reads `contracts/PlayerSaveAnchor.sol` and writes ABI + bytecode to `artifacts/`. If it fails here, fix the issue before trying to deploy.
+This runs `npx hardhat compile` which reads `contracts/PlayerSaveAnchor.sol` and writes ABI + bytecode to `artifacts/`. If it fails here, fix the issue before deploying.
 
-**Step 3 — Deploy**
+**Step 2 — Deploy to 0G Mainnet**
 
 ```bash
 npm run deploy:anchor
 ```
 
-This runs `npx hardhat run scripts/deploy.js --network 0g-newton`. Hardhat reads `ZG_PRIVATE_KEY` and `ZG_RPC_URL` from `.env`, compiles if needed, and deploys. Your deployer wallet is automatically set as the immutable `backendOperator`.
+This runs `npx hardhat run scripts/deploy.js --network 0g-mainnet`. Hardhat reads `ZG_PRIVATE_KEY` and `OG_MAINNET_RPC` from `.env`, compiles if needed, and deploys to chainId 16661. Your deployer wallet is automatically set as the immutable `backendOperator`.
 
 Output:
 
@@ -127,7 +128,7 @@ Output:
 ┌─────────────────────────────────────────────────────┐
 │         PlayerSaveAnchor — Hardhat Deploy           │
 └─────────────────────────────────────────────────────┘
-  Network:             0g-newton
+  Network:             0g-mainnet
   Deployer/Operator:   0xYourWalletAddress
   Balance:             1.42 A0GI
 
@@ -146,13 +147,23 @@ Add to .env:
    ZG_ANCHOR_CONTRACT_ADDRESS=0x4f91ab...
 ```
 
-**Step 4 — Add to .env**
+**Step 3 — Add to .env**
 
 ```
 ZG_ANCHOR_CONTRACT_ADDRESS=0x4f91ab...
 ```
 
 The `artifacts/` directory is generated by Hardhat at compile time — don't commit it. It's already in `.gitignore`.
+
+**Testing on testnet first?**
+
+If you want to test contract deployment on Newton testnet before mainnet:
+
+```bash
+npm run deploy:anchor:testnet
+```
+
+This deploys to chainId 16600. The contract code is identical — only the network differs. Note that `ZG_PRIVATE_KEY` needs testnet funds for this (faucet: https://faucet.0g.ai).
 
 **What the constructor does**
 
@@ -163,7 +174,7 @@ constructor(address _backendOperator) {
 }
 ```
 
-It sets `backendOperator` to the deployer's address as an `immutable` value. This cannot be changed after deployment. If you ever rotate your backend wallet, you'd need to redeploy the contract and migrate saves.
+Sets `backendOperator` to the deployer's address as an `immutable` value. This cannot be changed after deployment. If you ever rotate your backend wallet, you'd need to redeploy and update `ZG_ANCHOR_CONTRACT_ADDRESS`.
 
 ---
 
@@ -179,7 +190,7 @@ Production:
 npm start
 ```
 
-On startup you'll see a config summary that shows which 0G env vars are set and which aren't:
+On startup you'll see a config summary:
 
 ```
 ╔═══════════════════════════════════════════════════════╗
@@ -190,13 +201,13 @@ On startup you'll see a config summary that shows which 0G env vars are set and 
 🌐 Environment: development
 
 🔗 0G Infrastructure:
-   ⛓️  RPC URL:      https://evmrpc.0g.ai
-   🔢 Chain ID:     16600
+   ⛓️  Mainnet RPC:  https://evmrpc.0g.ai
+   🔢 Chain ID:     16661 (mainnet)
    📦 Storage:      https://indexer-storage-turbo.0g.ai
-   📡 DA Disperser: disperser-testnet.0g.ai:51001
+   📡 DA Disperser: disperser-testnet.0g.ai:51001 (testnet)
    📜 Anchor:       0x4f91ab...
    🔑 Operator Key: ✅ Set
-   🧠 Compute:      ⚠️  Skipped (ZG_COMPUTE_API_KEY not set)
+   🧠 Compute:      ✅ Set
    🚦 Enabled:      ✅ true
 ```
 
@@ -206,9 +217,9 @@ If you see `❌` next to any required var, fix it before testing.
 
 ## Running alongside the existing backend
 
-The original `zerodashbackend` runs on port 3000. This one defaults to 3001. They can run simultaneously without conflict — they share the same MongoDB (if you point them at the same `MONGO_URI`) or use separate databases.
+The original `zerodashbackend` runs on port 3000. This one defaults to 3001. They can run simultaneously — they share MongoDB if you point them at the same `MONGO_URI`, or use separate databases.
 
-If you run them against the same MongoDB, note that both write to the `players` collection via the `Player` model. This is fine — saves are additive. The new backend adds a `PlayerSaveRecord` collection that the old backend never touches.
+If you run them against the same MongoDB, both write to the `players` collection via the `Player` model. This is fine — saves are additive. The new backend adds a `PlayerSaveRecord` collection and an `AuthNonce` collection that the old backend never touches.
 
 ---
 
@@ -216,34 +227,42 @@ If you run them against the same MongoDB, note that both write to the `players` 
 
 **`Cannot find module 'ethers-v6'`**
 
-Run `npm install` from inside `zerodash-0g-backend/`, not from the parent directory. The alias is defined in this project's `package.json` only.
+Run `npm install --legacy-peer-deps` from inside `zerodash-0g-backend/`, not from the parent directory.
 
-**`ZG_ANCHOR_CONTRACT_ADDRESS not set` thrown from ZeroGChain.js**
+**`ZG_ANCHOR_CONTRACT_ADDRESS not set`**
 
-The anchor service throws on first use if the contract address isn't configured. Make sure you've deployed the contract and added the address to `.env`. If you're in dev mode and don't want the anchor step, set `ZG_ENABLED=false`.
+The anchor service throws on first use if the contract address isn't configured. Deploy the contract and add the address to `.env`. If you don't want the anchor step right now, set `ZG_ENABLED=false`.
+
+**`Trying to use a non-local installation of Hardhat`**
+
+Run `npm install --legacy-peer-deps` first. This error happens when `npx hardhat` downloads the latest Hardhat (v3) instead of using the local v2 install. The local install in `node_modules/.bin/hardhat` takes over once dependencies are installed.
+
+**`ERESOLVE unable to resolve dependency tree`**
+
+The 0G Storage SDK pins `ethers@6.13.1` exactly. Use `npm install --legacy-peer-deps` to bypass npm's strict peer dependency resolution.
 
 **DA finalization timing out**
 
-The 0G DA testnet occasionally has periods of slower finalization. The timeout is 120 seconds. If you're seeing consistent timeouts, check https://grafana.0g.ai for network status. The save is still valid — it just won't have a `daStatus: "finalized"` record. You can re-trigger verification later via `GET /player/verify`.
+The 0G DA testnet occasionally has periods of slower finalization. The timeout is 120 seconds. The save is still valid — it just won't have `daStatus: "finalized"`. Re-trigger verification via `GET /player/verify?wallet=0x...`.
 
 **`Error: Merkle tree error` from ZeroGStorage**
 
-Usually means the tmp file write failed (disk space, permissions) or the file was deleted before the SDK could process it. Check `os.tmpdir()` is writable and has space. The tmp files are cleaned up in a `finally` block, so you shouldn't accumulate them.
+Usually means the tmp file write failed (disk space, permissions) or was deleted before the SDK processed it. Check `os.tmpdir()` is writable. Tmp files are cleaned up in a `finally` block.
 
 **gRPC connection errors on DA**
 
-`disperser-testnet.0g.ai:51001` uses plaintext gRPC (no TLS). If you're behind a corporate proxy that requires HTTPS for all outbound connections, the gRPC call will fail. In that environment you'd need to set up a local proxy or use a VPN.
+`disperser-testnet.0g.ai:51001` uses plaintext gRPC (no TLS). If you're behind a corporate proxy that requires HTTPS for all outbound, the gRPC call will fail. Use a VPN or set up a local gRPC proxy.
 
-**`ERR_REQUIRE_ESM` from 0G Storage SDK**
+**`PRIVATE_KEY not configured` in leaderboard service**
 
-This happens if something tries to `require('@0gfoundation/0g-storage-ts-sdk')` directly instead of using `await import()`. The SDK is ESM-only. All calls to it in `ZeroGStorage.js` go through dynamic `import()` — don't change that, and don't try to require the SDK from other files.
+The leaderboard service requires a valid `PRIVATE_KEY` in `.env`. If you don't have a session/leaderboard wallet yet, the service logs a warning and disables itself — the rest of the backend still works.
 
 **Anti-rollback 409 during testing**
 
-If you're testing saves in a loop, the saveIndex increments permanently. You can't "reset" a wallet's saveIndex without deleting its `PlayerSaveRecord` documents from MongoDB. In dev:
+If you're testing saves in a loop, saveIndex increments permanently. Reset in dev:
 
 ```javascript
-// in mongo shell or Compass
+// mongo shell or Compass
 db.playersaverecords.deleteMany({ walletAddress: "0xyourwallet" })
 ```
 
@@ -251,33 +270,29 @@ db.playersaverecords.deleteMany({ walletAddress: "0xyourwallet" })
 
 ## Production checklist
 
-Before deploying to a production environment:
-
-- `ZG_ENABLED=true` — obvious, but worth confirming
-- `ZG_PRIVATE_KEY` — funded wallet, not the same as the dev key
-- `ZG_ANCHOR_CONTRACT_ADDRESS` — deployed to the correct chain, verified on explorer
-- `BROWSER_JWT_SECRET` — a real secret, not the default `dev-secret-change-me`
+- `ZG_ENABLED=true`
+- `ZG_PRIVATE_KEY` — funded wallet on 0G Mainnet, not the same as any dev key
+- `ZG_ANCHOR_CONTRACT_ADDRESS` — deployed to 0G Mainnet (chainId 16661), verified on explorer
+- `BROWSER_JWT_SECRET` — a real secret, not the default placeholder
 - `MONGO_URI` — pointing at the prod database, not localhost
 - `NODE_ENV=production`
 - `PORT` — behind a reverse proxy (nginx/caddy), not exposed directly
-- Rate limits — the defaults (10 saves/min, 30 loads/min) are conservative. Adjust in `profileRoutes.js` based on actual traffic.
-- The `ZG_PRIVATE_KEY` wallet needs enough A0GI balance to cover on-chain transactions. Each `anchorSave` call costs gas. Monitor the balance.
-
-There's no graceful shutdown handler in the current server. If you're running under PM2 or systemd, the background pipeline tasks that are in-flight when the process exits will be lost. They won't corrupt anything — the save is already in MongoDB and 0G Storage — but `daStatus` and `anchorTxHash` won't be updated. You can verify integrity retroactively via `GET /player/verify`.
+- Add your production domain to `allowedOrigins` in `src/server.js`
+- The `ZG_PRIVATE_KEY` wallet needs A0GI balance to cover `anchorSave` gas on mainnet. Monitor it.
 
 ---
 
 ## Contract verification on the explorer
 
-After deployment, verify the contract source on https://chainscan.0g.ai so anyone can read the code:
+After deployment, verify the contract source on https://chainscan.0g.ai:
 
 1. Go to your contract address on the explorer
-2. Click "Contract" → "Verify & Publish"
-3. Compiler: Solidity 0.8.20, optimization ON, 200 runs
+2. Click **Contract → Verify & Publish**
+3. Compiler: Solidity `0.8.20`, optimization ON, 200 runs
 4. Paste the source from `contracts/PlayerSaveAnchor.sol`
 5. Constructor argument: your deployer wallet address, ABI-encoded as a 32-byte hex value
 
-To ABI-encode the constructor arg:
+Generate the ABI-encoded constructor arg:
 ```bash
 node -e "
 const { ethers } = require('ethers-v6');
@@ -293,45 +308,54 @@ console.log(ethers.AbiCoder.defaultAbiCoder().encode(['address'], [addr]).slice(
 ```
 zerodash-0g-backend/
 ├── contracts/
-│   └── PlayerSaveAnchor.sol      compile in Remix, deploy via scripts/
+│   └── PlayerSaveAnchor.sol      compile via hardhat, deploy via scripts/
 │
 ├── docs/
-│   ├── architecture.md           this is that file
+│   ├── architecture.md           system architecture and data flow
 │   ├── api.md                    endpoint reference
-│   └── deployment.md             you are here
+│   ├── deployment.md             you are here
+│   └── documents.md              complete architecture reference
 │
 ├── protos/
 │   └── disperser.proto           gRPC schema for 0G DA
 │
 ├── scripts/
-│   └── deployAnchor.js           npm run deploy:anchor
+│   └── deploy.js                 npm run deploy:anchor
 │
 └── src/
     ├── server.js                 entry point, CORS, route mounting
     ├── config/db.js              mongoose connect
     │
     ├── middleware/
-    │   └── auth.js               JWT → req.walletAddress
+    │   └── auth.js               JWT verify → req.walletAddress
     │
     ├── models/
     │   ├── Player.js             existing player profile schema
-    │   └── PlayerSaveRecord.js   0G metadata index (no game data here)
+    │   ├── PlayerSaveRecord.js   0G metadata index (no game data)
+    │   └── AuthNonce.js          single-use nonces, auto-TTL 5 min
+    │
+    ├── utils/
+    │   └── retry.js              exponential backoff wrapper
     │
     ├── services/
-    │   ├── ZeroGStorage.js       0G file upload/download
-    │   ├── ZeroGDA.js            gRPC → DA disperser
-    │   ├── ZeroGChain.js         PlayerSaveAnchor contract calls
-    │   └── ZeroGCompute.js       TEE anti-cheat inference
+    │   ├── ZeroGStorage.js       0G mainnet file upload/download
+    │   ├── ZeroGDA.js            gRPC → DA disperser (testnet)
+    │   ├── ZeroGChain.js         PlayerSaveAnchor contract (mainnet)
+    │   └── ZeroGCompute.js       TEE anti-cheat via 0G Compute API
     │
     ├── blockchain/
-    │   ├── sessionService.js     existing 0G Mainnet session contract
-    │   └── leaderboardService.js existing 0G Mainnet leaderboard contract
+    │   ├── sessionService.js     0G Mainnet session contract
+    │   └── leaderboardService.js 0G Mainnet leaderboard contract
     │
     ├── controllers/
+    │   ├── authController.js     nonce + signature login
     │   ├── player.controller.js  legacy endpoints + dual-write
-    │   └── zgController.js       all 0G-native endpoints
+    │   ├── zgController.js       0G save/load endpoints and pipeline
+    │   └── zgUXController.js     dashboard, activity, proof, badge, explorer
     │
     └── routes/
+        ├── authRoutes.js         /auth/nonce and /auth/login
         ├── profileRoutes.js      0G routes (mounted first)
+        ├── zgUXRoutes.js         /0g/ UX endpoints
         └── player.routes.js      legacy routes (unchanged)
 ```

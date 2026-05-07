@@ -62,7 +62,7 @@ zerodash-0g-backend/
 ├── scripts/
 │   └── deploy.js                   Hardhat deploy script for PlayerSaveAnchor
 │
-├── hardhat.config.js               Hardhat config pointing at 0G Newton testnet
+├── hardhat.config.js               Hardhat config — 0g-mainnet (16661) + 0g-newton (16600) networks
 │
 ├── package.json
 │
@@ -110,32 +110,23 @@ zerodash-0g-backend/
 
 ## Two-chain topology
 
-The backend talks to two completely separate EVM-compatible blockchains.
-
-**0G Newton Testnet — chainId 16600**
-
-This is where the PlayerSaveAnchor contract lives. Every time a player saves, the backend sends a transaction to this contract that records:
-- The player's wallet address
-- Their save index (monotonically increasing)
-- The root hash of the save file (a Merkle root over the file content)
-- A timestamp
-
-This chain uses the `ethers-v6` package alias. All 0G-specific services import from `require("ethers-v6")` to make it explicit.
-
-RPC endpoint: `https://evmrpc.0g.ai` (configured in `ZG_RPC_URL`)
-The backend sends transactions signed with `ZG_PRIVATE_KEY`.
+The backend runs almost entirely on one chain, with one testnet exception.
 
 **0G Mainnet — chainId 16661**
 
-This is where the session tracking and leaderboard contracts live. These were deployed before this backend was written, so this code only calls into them — it does not deploy or modify them. These services use the top-level `ethers` package (which is also v6, but kept distinct by convention).
+This is where everything lives: the `PlayerSaveAnchor` contract, all 0G Storage transactions, the session contract, and the leaderboard contract. All services in `src/services/` and `src/blockchain/` target this chain via `OG_MAINNET_RPC` (defaults to `https://evmrpc.0g.ai`) and `OG_MAINNET_CHAIN_ID=16661`.
 
-The session contract records when a player starts and ends a gaming session. The leaderboard contract records periodic snapshots of top players.
+The backend signs mainnet transactions with two wallets:
+- `ZG_PRIVATE_KEY` — backend operator wallet, used for Storage uploads and `anchorSave` contract calls
+- `PRIVATE_KEY` — used for session and leaderboard contract calls (can be the same wallet)
 
-Both chains are 0G infrastructure. They are EVM-compatible, so standard ethers.js works with them. They are not Ethereum — they have their own native token (A0GI), their own block times, and their own faucet at `https://faucet.0g.ai`.
+**0G DA Testnet — the one exception**
+
+0G Data Availability is not yet available on mainnet. The DA disperser (`disperser-testnet.0g.ai:51001`) is testnet-only and stays that way until 0G launches DA on mainnet. Everything else is mainnet.
 
 **Why two separate ethers imports?**
 
-The 0G Storage SDK (`@0gfoundation/0g-storage-ts-sdk`) is an ESM module. It bundles its own ethers-like utilities. To avoid version conflicts with that SDK and to keep the chain-16600 and chain-16661 code paths visually distinct in the source, the project uses the `ethers-v6` alias for Newton testnet interactions and the top-level `ethers` for mainnet interactions. Both resolve to ethers v6, but the explicit aliasing makes the code easier to audit.
+The `ethers-v6` alias (`"ethers-v6": "npm:ethers@6.13.1"`) is used in `ZeroGStorage.js` and `ZeroGChain.js`. The top-level `ethers` (same version, `6.13.1`) is used in `sessionService.js` and `leaderboardService.js`. Both resolve to the same ethers v6, but the explicit aliasing makes the Storage/Chain services visually distinct and easier to audit separately from the legacy blockchain services.
 
 ---
 
@@ -210,51 +201,50 @@ Some endpoints accept an alternative: `{ wallet }` in the request body (for brow
 
 0G Storage is a decentralized file store. Files are addressed by their Merkle root hash. Once uploaded, a file can be downloaded from any storage node that has it, and the content can be verified by recomputing the Merkle tree.
 
-### SDK constraint
+### SDK notes (v1.2.9)
 
-The `@0gfoundation/0g-storage-ts-sdk` is an ESM-only package in a CommonJS codebase. It cannot be `require()`d directly. All calls to it go through `await import(...)` inside async functions. This is why the service file uses the pattern:
+`@0gfoundation/0g-storage-ts-sdk` v1.2.9 ships a CommonJS build (`lib.commonjs/index.js`), so it can be `require()`d directly — no dynamic `import()` needed.
 
 ```javascript
-const { ZgFile, getIndexer } = await import("@0gfoundation/0g-storage-ts-sdk");
+const { Indexer, ZgFile } = require("@0gfoundation/0g-storage-ts-sdk");
 ```
 
-This is non-negotiable. If anything tries to `require` the SDK directly, it will throw `ERR_REQUIRE_ESM`. The dynamic import resolves at runtime after the module system is ready.
+**v1.2.9 API:**
+- `new Indexer(indRpc)` — takes only the indexer URL, no signer in constructor
+- `indexer.upload(zgFile, evmRpc, signer)` — signer passed per-call
+- `indexer.download(rootHash, outputPath, withProof)` — third arg is a plain boolean
+- `file.close()` — must be called after `merkleTree()` and `upload()`
 
-### Singleton indexer
+### Singleton design
 
-The 0G Storage SDK requires an `Indexer` object that is initialized with the storage node endpoint (`ZG_INDEXER_RPC`) and the operator wallet (`ZG_PRIVATE_KEY`). Creating this object involves connecting to the storage network.
-
-The service holds a module-level `_indexer` variable. On first use, `getIndexer()` initializes it and caches it. Subsequent calls return the cached instance, avoiding repeated connection setup.
-
-**Resilience design:** If any upload or download fails, `_indexer` is reset to `null` before the error is re-thrown. This forces a fresh initialization on the next attempt rather than reusing a potentially broken connection. This is the fix for the "fragile singleton" feedback — without the reset, a transient network failure would permanently break the service until the process restarted.
+Two module-level singletons: `_indexer` (the Indexer instance) and `_signer` (the ethers Wallet). Both are initialized on first use and reset to `null` on any error, forcing re-initialization on the next attempt rather than reusing a broken connection.
 
 ### Upload flow
 
-`uploadBuffer(buffer)` takes a `Buffer` of binary data (a msgpack-encoded player profile or a Unity binary save).
+`uploadBuffer(buffer)` takes a `Buffer` of binary data.
 
 1. Writes the buffer to a temp file (`os.tmpdir()` + random suffix)
-2. Calls `ZgFile.fromFilePath(tmpPath)` to let the SDK compute the Merkle tree
-3. Calls `indexer.upload(zgFile, storageRpc, { ...opts })` which uploads to the storage network
-4. Returns `{ rootHash, size }` — the root hash is the content address; store it for future downloads
-5. Always deletes the temp file in a `finally` block
+2. Calls `ZgFile.fromFilePath(tmpPath)` — SDK computes the Merkle tree
+3. Calls `file.merkleTree()` — gets `[tree, err]`, extracts `rootHash`
+4. Calls `indexer.upload(file, ZG_RPC_URL, signer)` — uploads to mainnet storage nodes
+5. Calls `file.close()` in the finally block
+6. Returns `{ rootHash, txHash, size, checksum }`
 
-The entire flow is wrapped in `withRetry` with 3 attempts and 4-second base delay.
+Wrapped in `withRetry` with 3 attempts and 4-second base delay.
 
 ### Download flow
 
 `downloadToBuffer(rootHash)` retrieves a file by its Merkle root hash.
 
 1. Creates a temp file path for the download target
-2. Calls `indexer.download(rootHash, tmpPath, { withProof: true })` — the `withProof` flag causes the SDK to verify the Merkle proof during download, ensuring the content matches the root hash
-3. Reads the downloaded file into a buffer
-4. Returns the buffer
-5. Always deletes the temp file
+2. Calls `indexer.download(rootHash, tmpPath, true)` — `true` = verify Merkle proof during download
+3. Reads the downloaded file into a buffer and returns it
 
 Also wrapped in `withRetry` with the same parameters.
 
 ### Why temp files instead of in-memory streams?
 
-The 0G Storage SDK works with file paths, not streams or buffers. It needs to seek through the file to build the Merkle tree. Using `os.tmpdir()` is the correct approach — it is a standard, writable location on all platforms.
+The SDK works with file paths, not buffers. It needs to seek through the file to build the Merkle tree. `os.tmpdir()` is the correct approach — writable on all platforms, cleaned up in a `finally` block.
 
 ---
 
@@ -299,7 +289,7 @@ The anchor step puts the save's root hash on-chain. Once written, it cannot be c
 
 ### PlayerSaveAnchor contract
 
-The contract is deployed on 0G Newton Testnet (chainId 16600). Its address is in `ZG_ANCHOR_CONTRACT_ADDRESS`.
+The contract is deployed on 0G Mainnet (chainId 16661). Its address is in `ZG_ANCHOR_CONTRACT_ADDRESS`.
 
 The key storage structure is:
 
@@ -727,17 +717,16 @@ All configuration comes from environment variables loaded via `dotenv` at startu
 | `MONGO_URI` | Yes | MongoDB connection string |
 | `BROWSER_JWT_SECRET` | Yes | Secret for signing JWTs |
 | `ZG_ENABLED` | No | Set `false` to disable all 0G operations |
-| `ZG_RPC_URL` | Yes | 0G Newton Testnet RPC endpoint |
-| `ZG_CHAIN_ID` | Yes | Should be `16600` |
-| `ZG_INDEXER_RPC` | Yes | 0G Storage indexer endpoint |
-| `ZG_DA_DISPERSER` | Yes | DA gRPC endpoint (`host:port`) |
-| `ZG_PRIVATE_KEY` | Yes | Backend operator private key |
-| `ZG_ANCHOR_CONTRACT_ADDRESS` | Yes | Deployed PlayerSaveAnchor address |
-| `ZG_COMPUTE_API_KEY` | No | 0G Compute API key (anti-cheat optional) |
-| `OG_MAINNET_RPC` | No | 0G Mainnet RPC (for session/leaderboard) |
-| `PRIVATE_KEY` | No | Mainnet wallet (for session/leaderboard) |
-| `SESSION_CONTRACT_ADDRESS` | No | Session tracking contract (16661) |
-| `LEADERBOARD_CONTRACT_ADDRESS` | No | Leaderboard contract (16661) |
+| `OG_MAINNET_RPC` | Yes | 0G Mainnet RPC — used by Storage, Chain, sessions, leaderboard |
+| `OG_MAINNET_CHAIN_ID` | Yes | Should be `16661` |
+| `ZG_INDEXER_RPC` | Yes | 0G Storage indexer on mainnet |
+| `ZG_DA_DISPERSER` | Yes | DA gRPC endpoint (testnet) — `disperser-testnet.0g.ai:51001` |
+| `ZG_PRIVATE_KEY` | Yes | Backend operator private key (mainnet, pays anchor gas) |
+| `ZG_ANCHOR_CONTRACT_ADDRESS` | Yes | PlayerSaveAnchor deployed on 0G Mainnet |
+| `ZG_COMPUTE_API_KEY` | No | 0G Compute API key — get from pc.0g.ai |
+| `PRIVATE_KEY` | No | Wallet for session/leaderboard contracts (mainnet) |
+| `SESSION_CONTRACT_ADDRESS` | No | Session tracking contract (chainId 16661) |
+| `LEADERBOARD_CONTRACT_ADDRESS` | No | Leaderboard contract (chainId 16661) |
 
 The startup log prints the status of every 0G variable so missing configuration is visible immediately on boot.
 

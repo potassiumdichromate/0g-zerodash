@@ -5,7 +5,7 @@ pragma solidity ^0.8.20;
  * PlayerSaveAnchor — anchors 0G Storage root hashes on-chain.
  *
  * Deploy via: npm run deploy:anchor
- * Chain: 0G EVM (chainId 16600)
+ * Chain: 0G EVM (chainId 16661)
  *
  * Security rules enforced here:
  *  - Only the player wallet OR the immutable backendOperator can anchor a save.

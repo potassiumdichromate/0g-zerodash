@@ -68,7 +68,7 @@ async function validateSave(saveInput, rootHash) {
       Authorization: `Bearer ${process.env.ZG_COMPUTE_API_KEY}`
     },
     body: JSON.stringify({
-      model: "neuralmagic/Meta-Llama-3.1-70B-Instruct-FP8",
+      model: "deepseek/deepseek-chat-v3-0324",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user",   content: userMessage }

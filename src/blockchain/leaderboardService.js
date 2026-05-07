@@ -17,18 +17,33 @@ const ABI = [
 
 class LeaderboardService {
   constructor() {
+    this.provider = null;
+    this.wallet   = null;
+    this.contract = null;
+    this.initialized = false;
+  }
+
+  _init() {
+    if (this.initialized) return;
+    const key = process.env.PRIVATE_KEY;
+    if (!key || key.startsWith("0xyour-")) {
+      console.warn("⚠️  LeaderboardService: PRIVATE_KEY not set — leaderboard writes disabled");
+      return;
+    }
     this.provider = new ethers.JsonRpcProvider(
       process.env.OG_MAINNET_RPC || "https://evmrpc.0g.ai",
       { chainId: 16661, name: "0g-mainnet" }
     );
-    this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+    this.wallet   = new ethers.Wallet(key, this.provider);
     this.contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, this.wallet);
-
+    this.initialized = true;
     console.log("🏆 Leaderboard Service Connected");
     console.log("📍 Contract:", CONTRACT_ADDRESS);
   }
 
   async saveLeaderboardOnChain(requestedBy, userWallet, leaderboardData) {
+    this._init();
+    if (!this.contract) return { success: false, error: "PRIVATE_KEY not configured" };
     try {
       const { userScore, userStanding, topPlayers } = leaderboardData;
 
@@ -62,6 +77,8 @@ class LeaderboardService {
   }
 
   async getSnapshot(snapshotId) {
+    this._init();
+    if (!this.contract) return null;
     try {
       const snapshot   = await this.contract.getSnapshot(snapshotId);
       const topPlayers = await this.contract.getSnapshotTopPlayers(snapshotId);
@@ -95,6 +112,8 @@ class LeaderboardService {
   }
 
   async getLatestSnapshot() {
+    this._init();
+    if (!this.contract) return null;
     try {
       const snapshot = await this.contract.getLatestSnapshot();
       return await this.getSnapshot(Number(snapshot.snapshotId));
@@ -105,6 +124,8 @@ class LeaderboardService {
   }
 
   async getPlayerSnapshots(playerAddress) {
+    this._init();
+    if (!this.contract) return [];
     try {
       const ids = await this.contract.getPlayerSnapshots(playerAddress);
       return ids.map(id => Number(id));
@@ -115,6 +136,8 @@ class LeaderboardService {
   }
 
   async getTotalSnapshots() {
+    this._init();
+    if (!this.contract) return 0;
     try {
       return Number(await this.contract.totalSnapshots());
     } catch (error) {
@@ -124,6 +147,8 @@ class LeaderboardService {
   }
 
   async getLatestTop3() {
+    this._init();
+    if (!this.contract) return { first: null, second: null, third: null };
     try {
       const [first, second, third] = await this.contract.getLatestTop3();
       return { first, second, third };
@@ -134,6 +159,7 @@ class LeaderboardService {
   }
 
   isReady() {
+    this._init();
     return !!CONTRACT_ADDRESS && !!this.wallet && !!this.provider;
   }
 
@@ -143,7 +169,7 @@ class LeaderboardService {
       network: "0G Mainnet",
       chainId: 16661,
       explorerUrl: `https://chainscan.0g.ai/address/${CONTRACT_ADDRESS}`,
-      rpcUrl: this.provider._getConnection().url
+      rpcUrl: this.provider?._getConnection?.().url || process.env.OG_MAINNET_RPC || "https://evmrpc.0g.ai"
     };
   }
 }
