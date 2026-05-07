@@ -14,7 +14,7 @@ const path = require("path");
 const PROTO_PATH   = path.join(__dirname, "../../protos/disperser.proto");
 const DA_ENDPOINT  = process.env.ZG_DA_DISPERSER || "disperser-testnet.0g.ai:51001";
 const POLL_INTERVAL_MS = 5_000;
-const TIMEOUT_MS       = 120_000;
+const TIMEOUT_MS       = 240_000; // docs recommend 180 rounds × 1s; use 240s for safety
 
 let _client = null;
 
@@ -30,10 +30,13 @@ function getClient() {
   });
 
   const proto = grpc.loadPackageDefinition(packageDef);
-  _client = new proto.disperser.Disperser(
-    DA_ENDPOINT,
-    grpc.credentials.createInsecure()
-  );
+
+  // Try SSL first (most DA endpoints require TLS), fall back to insecure
+  const creds = DA_ENDPOINT.includes("testnet") || DA_ENDPOINT.includes(":51001")
+    ? grpc.credentials.createSsl()
+    : grpc.credentials.createInsecure();
+
+  _client = new proto.disperser.Disperser(DA_ENDPOINT, creds);
   return _client;
 }
 
@@ -57,11 +60,21 @@ function getBlobStatus(requestId) {
 
 async function pollUntilFinalized(requestId) {
   const deadline = Date.now() + TIMEOUT_MS;
+  let consecutiveErrors = 0;
 
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
 
-    const status = await getBlobStatus(requestId);
+    let status;
+    try {
+      status = await getBlobStatus(requestId);
+      consecutiveErrors = 0;
+    } catch (err) {
+      consecutiveErrors++;
+      console.warn(`[DA] GetBlobStatus error (${consecutiveErrors}): ${err.message}`);
+      if (consecutiveErrors >= 5) throw new Error(`DA polling failed after 5 consecutive errors: ${err.message}`);
+      continue;
+    }
 
     // 3 = FINALIZED
     if (status.status === 3 || status.status === "FINALIZED") {
@@ -70,11 +83,13 @@ async function pollUntilFinalized(requestId) {
 
     // 4 = FAILED
     if (status.status === 4 || status.status === "FAILED") {
-      throw new Error("DA blob finalization failed");
+      throw new Error("DA blob finalization failed (disperser rejected blob)");
     }
+
+    console.log(`[DA] Blob status: ${status.status} — waiting...`);
   }
 
-  throw new Error("DA finalization timeout after 120 s");
+  throw new Error(`DA finalization timeout after ${TIMEOUT_MS / 1000}s`);
 }
 
 /**

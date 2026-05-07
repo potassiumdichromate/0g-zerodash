@@ -36,10 +36,12 @@ Respond ONLY with a single JSON object — no markdown, no explanation:
 /**
  * Return true when compute anti-cheat should fire.
  * Skips automatically when ZG_COMPUTE_API_KEY is absent.
+ * Runs on every save when key is set — delta thresholds only skip if truly zero-change.
  */
 function shouldTriggerCompute(meta) {
   if (!process.env.ZG_COMPUTE_API_KEY) return false;
-  return meta.coinDelta > 100 || meta.saveIndexDelta > 1;
+  // Always run if this is a real save (saveIndexDelta >= 1)
+  return meta.saveIndexDelta >= 1;
 }
 
 /**
@@ -99,17 +101,20 @@ async function validateSave(saveInput, rootHash) {
     );
   }
 
+  // 0G-specific fields are in data.x_0g_trace per docs
+  const trace = data.x_0g_trace || {};
+
   return {
     valid:           parsed.valid,
     confidence:      parsed.confidence,
     flags:           parsed.flags || [],
     verdict:         parsed.verdict,
     rootHash:        parsed.rootHash,
-    teeVerified:     data.tee_verified     || false,
-    providerAddress: data.provider_address || null,
+    teeVerified:     trace.tee_verified     || false,
+    providerAddress: trace.provider         || null,
     chatId:          data.id               || null,
-    requestId:       data.request_id       || null,
-    billingCost:     data.billing_cost     || null,
+    requestId:       trace.request_id       || null,
+    billingCost:     trace.billing?.total_cost || null,
     validatedAt:     new Date()
   };
 }
