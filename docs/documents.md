@@ -1,6 +1,6 @@
 # ZeroDash 0G Backend — Complete Architecture Reference
 
-This document explains how the entire backend works: every layer, every decision, every data flow. It is written for someone who needs to understand, extend, or debug the system — not just run it.
+This document explains how the entire backend works: every layer, every decision, every data flow. It is the complete technical reference for someone who need to understand, extend, or debug the system.
 
 ---
 
