@@ -25,13 +25,24 @@ const { withRetry }           = require("../utils/retry");
 const ZG_RPC_URL  = process.env.OG_MAINNET_RPC       || "https://evmrpc.0g.ai";
 const ZG_CHAIN_ID = parseInt(process.env.OG_MAINNET_CHAIN_ID || "16661");
 
-// Ordered list of indexer endpoints — tried in sequence on failure
+// Ordered list of indexer endpoints — tried in sequence on failure.
+// NOTE: storage-indexer-v2.0g.ai is a dead hostname and must NOT be in this list.
+// The rotation wraps back to [0] once all URLs have been exhausted so the
+// service auto-recovers when a previously-down indexer comes back up.
 const ZG_INDEXER_URLS = [
-  process.env.ZG_INDEXER_RPC,
+  process.env.ZG_INDEXER_RPC,               // from .env  (e.g. indexer-storage-turbo-v2.0g.ai)
+  "https://indexer-storage-turbo-v2.0g.ai", // explicit fallback in case env is missing
   "https://indexer-storage-turbo.0g.ai",
   "https://indexer-storage-turbo-standard.0g.ai",
-  "https://storage-indexer-v2.0g.ai",
-].filter(Boolean);
+].filter(Boolean)
+
+// Deduplicate so the env value doesn't appear twice if it matches a fallback
+const _seenUrls = new Set();
+const ZG_INDEXER_URLS_DEDUPED = ZG_INDEXER_URLS.filter(u => {
+  if (_seenUrls.has(u)) return false;
+  _seenUrls.add(u);
+  return true;
+});
 
 let _indexer     = null;
 let _indexerUrl  = null;
@@ -54,7 +65,7 @@ function getSigner() {
 
 function getIndexer() {
   if (!_indexer) {
-    const url = _indexerUrl || ZG_INDEXER_URLS[0];
+    const url = _indexerUrl || ZG_INDEXER_URLS_DEDUPED[0];
     _indexer    = new Indexer(url);
     _indexerUrl = url;
     console.log(`[0G] Using indexer: ${url}`);
@@ -62,17 +73,17 @@ function getIndexer() {
   return _indexer;
 }
 
-// Try next indexer URL in the list on repeated failure
+// Try next indexer URL in the list on repeated failure.
+// Wraps back to index 0 after exhausting all URLs so the service auto-recovers.
 function rotateIndexer() {
-  const current = _indexerUrl || ZG_INDEXER_URLS[0];
-  const idx     = ZG_INDEXER_URLS.indexOf(current);
-  const next    = ZG_INDEXER_URLS[idx + 1];
-  if (next) {
-    console.warn(`[0G] Indexer ${current} failed — trying ${next}`);
-    _indexerUrl = next;
-  }
-  _indexer = null;
-  _signer  = null;
+  const current = _indexerUrl || ZG_INDEXER_URLS_DEDUPED[0];
+  const idx     = ZG_INDEXER_URLS_DEDUPED.indexOf(current);
+  const nextIdx = (idx + 1) % ZG_INDEXER_URLS_DEDUPED.length;
+  const next    = ZG_INDEXER_URLS_DEDUPED[nextIdx];
+  console.warn(`[0G] Indexer ${current} failed — rotating to ${next}`);
+  _indexerUrl = next;
+  _indexer    = null;
+  _signer     = null;
 }
 
 function tmpPath() {
