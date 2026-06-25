@@ -49,6 +49,9 @@ app.use("/auth", require("./routes/authRoutes"));
 // 0G UX endpoints — dashboard, activity, proof, badge, network, verified leaderboard
 app.use("/0g", require("./routes/zgUXRoutes"));
 
+// Cross-game public progress endpoints.
+app.use("/cross-game", require("./routes/crossGameRoutes"));
+
 // 0G save/load routes — mounted BEFORE legacy so they take priority on /player prefix
 app.use("/player", require("./routes/profileRoutes"));
 

@@ -2,6 +2,22 @@ const Player = require("../models/Player");
 const sessionService = require("../blockchain/sessionService");
 const leaderboardService = require("../blockchain/leaderboardService");
 const { persistProfileTo0G } = require("./zgController");
+const { classifyCrossGamePerformance } = require("../utils/crossGameDifficulty");
+
+function buildZeroDashCrossGame(player) {
+  return {
+    coins: classifyCrossGamePerformance("zerodashCoins", player?.coins || 0),
+    best: classifyCrossGamePerformance("zerodashBest", player?.highScore || 0)
+  };
+}
+
+function withZeroDashCrossGame(player) {
+  const data = player?.toObject ? player.toObject() : { ...(player || {}) };
+  return {
+    ...data,
+    crossGame: buildZeroDashCrossGame(data)
+  };
+}
 
 exports.getProfile = async (req, res) => {
   try {
@@ -26,7 +42,7 @@ exports.getProfile = async (req, res) => {
       console.error("Blockchain session recording failed (non-critical):", blockchainError);
     }
 
-    return res.json({ ...player.toObject(), blockchain: blockchainResult });
+    return res.json({ ...withZeroDashCrossGame(player), blockchain: blockchainResult });
   } catch (err) {
     console.error("Get profile error:", err);
     return res.status(500).json({ error: "Failed to load player profile" });
@@ -72,6 +88,7 @@ exports.saveProfile = async (req, res) => {
 
     res.json({
       success: true,
+      data: withZeroDashCrossGame(player),
       savedToBlockchain: blockchainResult?.success || false,
       blockchain: blockchainResult
     });
@@ -94,14 +111,15 @@ exports.getLeaderboard = async (req, res) => {
     const userWallet = req.walletAddress || req.query.wallet;
 
     const players = await Player.find(
-      {}, { walletAddress: 1, highScore: 1, _id: 0 }
+      {}, { walletAddress: 1, coins: 1, highScore: 1, _id: 0 }
     ).sort({ highScore: -1 }).limit(limit).lean();
 
     let userStanding = 0;
     let userScore = 0;
+    let userCrossGame = null;
 
     if (userWallet) {
-      const allPlayers = await Player.find({}, { walletAddress: 1, highScore: 1 })
+      const allPlayers = await Player.find({}, { walletAddress: 1, coins: 1, highScore: 1 })
         .sort({ highScore: -1 }).lean();
 
       const userIndex = allPlayers.findIndex(
@@ -111,6 +129,7 @@ exports.getLeaderboard = async (req, res) => {
       if (userIndex !== -1) {
         userStanding = userIndex + 1;
         userScore    = allPlayers[userIndex].highScore;
+        userCrossGame = buildZeroDashCrossGame(allPlayers[userIndex]);
       }
     }
 
@@ -128,9 +147,10 @@ exports.getLeaderboard = async (req, res) => {
     }
 
     res.json({
-      leaderboard:  players ?? [],
+      leaderboard:  (players ?? []).map(withZeroDashCrossGame),
       userStanding: userStanding || null,
       userScore:    userScore || null,
+      userCrossGame,
       blockchain:   blockchainResult
     });
   } catch (err) {
