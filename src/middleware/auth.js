@@ -29,8 +29,15 @@ function verifyToken(token) {
 function extractWallet(payload) {
   const candidates = [
     payload?.walletAddress,
+    payload?.wallet_address,
     payload?.address,
     payload?.wallet,
+    payload?.wallet?.address,
+    payload?.wallet?.walletAddress,
+    payload?.wallet?.wallet_address,
+    payload?.user?.walletAddress,
+    payload?.user?.wallet_address,
+    payload?.user?.address,
     payload?.sub
   ];
   const w = candidates.find(v => typeof v === "string" && v.trim().length > 0);
