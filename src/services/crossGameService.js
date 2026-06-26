@@ -1,5 +1,6 @@
 const Player = require('../models/Player');
 const { classifyCrossGamePerformance } = require('../utils/crossGameDifficulty');
+const { grantWarzoneGunReward } = require('./warzoneGunRewardClient');
 
 const CROSS_GAME_BACKENDS = Object.freeze({
   zeroDash: 'https://zerodashbackend.onrender.com',
@@ -42,15 +43,33 @@ async function getLocalCrossGame(walletAddress) {
   const player = await Player.findOne({ walletAddress: wallet }).select('walletAddress coins highScore').lean();
   const coins = Number(player?.coins || 0);
   const best = Number(player?.highScore || 0);
+  const crossGame = {
+    coins: classifyCrossGamePerformance('zerodashCoins', coins),
+    best: classifyCrossGamePerformance('zerodashBest', best),
+  };
+  let rewardSync = null;
+  try {
+    rewardSync = await grantWarzoneGunReward({
+      walletAddress: wallet,
+      sourceGame: 'zeroDash',
+      crossGame,
+    });
+  } catch (error) {
+    rewardSync = { eligible: true, granted: false, error: error?.message || 'Warzone reward sync failed' };
+  }
+
   return {
     gameKey: 'zeroDash',
     game: 'Zerodash',
     walletAddress: wallet,
     available: Boolean(player),
     metrics: { coins, best },
-    crossGame: {
-      coins: classifyCrossGamePerformance('zerodashCoins', coins),
-      best: classifyCrossGamePerformance('zerodashBest', best),
+    crossGame,
+    reward: {
+      type: 'warzone_gun',
+      name: 'Shotgun',
+      unlocksAt: 'medium',
+      sync: rewardSync,
     },
   };
 }
