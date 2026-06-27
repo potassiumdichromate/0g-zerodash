@@ -3,6 +3,7 @@ const sessionService = require("../blockchain/sessionService");
 const leaderboardService = require("../blockchain/leaderboardService");
 const { persistProfileTo0G } = require("./zgController");
 const { classifyCrossGamePerformance } = require("../utils/crossGameDifficulty");
+const { queueWarzoneGunReward } = require("../services/warzoneGunRewardClient");
 
 function buildZeroDashCrossGame(player) {
   return {
@@ -73,6 +74,13 @@ exports.saveProfile = async (req, res) => {
       { $set: update },
       { upsert: true, new: true }
     );
+    const crossGame = buildZeroDashCrossGame(player);
+    queueWarzoneGunReward({
+      walletAddress: req.walletAddress,
+      sourceGame: "zeroDash",
+      crossGame,
+      source: "profile.save",
+    });
 
     let blockchainResult = null;
     try {
