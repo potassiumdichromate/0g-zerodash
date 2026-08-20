@@ -15,7 +15,8 @@ const allowedOrigins = [
   "https://pub-c51325b05b6848599be1cf2978bc4c0e.r2.dev",
   "https://cn.warzonewarriors.xyz",
   "https://robowarsgame.xyz",
-  "https://0g-testfrontend.vercel.app"
+  "https://0g-testfrontend.vercel.app",
+  "https://app.kult.games"
 ];
 
 app.use(cors({
